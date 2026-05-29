@@ -1,17 +1,17 @@
 import os
-from typing import Iterable, Any
+from typing import Any
 from hubspot import HubSpot
 from src.integrations.hubspot.mapping import hubspot_contact_to_incoming
 
 def _build_client(access_token: str, base_url: str | None = None) -> HubSpot:
-    """Indirection point for building the HubSpot client."""
+    """Indirection point for building the HubSpot client for testability."""
     client = HubSpot(access_token=access_token)
     if base_url:
         client.api_client.configuration.host = base_url
     return client
 
 def _get_page(client: HubSpot, after: str | None, properties: list[str]) -> Any:
-    """Indirection point for the HubSpot API call."""
+    """Indirection point for the HubSpot API call to facilitate mocking."""
     return client.crm.contacts.basic_api.get_page(
         limit=100,
         after=after,
@@ -19,13 +19,14 @@ def _get_page(client: HubSpot, after: str | None, properties: list[str]) -> Any:
     )
 
 def _to_dict(obj: Any) -> dict[str, Any]:
-    """Indirection point for converting HubSpot objects to dict."""
+    """Indirection point for converting HubSpot library objects to native dicts."""
     return obj.to_dict()
 
 def fetch_contacts() -> list[dict[str, Any]]:
     """
     Pulls contacts from HubSpot and returns a list of IncomingContact dicts.
-    Reads credentials from environment variables on every call.
+    Reads credentials from environment variables on every call to support
+    dynamic configuration and test environment switching.
     """
     access_token = os.environ.get("HUBSPOT_ACCESS_TOKEN")
     if not access_token:
@@ -34,6 +35,7 @@ def fetch_contacts() -> list[dict[str, Any]]:
     base_url = os.environ.get("HUBSPOT_API_BASE")
     client = _build_client(access_token, base_url)
     
+    # Request unified-schema properties explicitly
     properties = ["firstname", "lastname", "email", "phone", "jobtitle", "company"]
     incoming_contacts = []
     after = None
@@ -42,12 +44,14 @@ def fetch_contacts() -> list[dict[str, Any]]:
         try:
             page = _get_page(client, after, properties)
         except Exception as e:
+            # Wrap library exceptions with context for the host ingest orchestrator
             raise RuntimeError(f"HubSpot API request failed: {str(e)}") from e
 
         for contact_obj in (page.results or []):
             raw_dict = _to_dict(contact_obj)
             incoming_contacts.append(hubspot_contact_to_incoming(raw_dict))
 
+        # Check for pagination cursor
         if page.paging and page.paging.next and page.paging.next.after:
             after = page.paging.next.after
         else:

@@ -5,7 +5,7 @@ from src.integrations.hubspot.client import fetch_contacts
 def test_fetch_contacts_missing_creds():
     with patch.dict("os.environ", {}, clear=True):
         with pytest.raises(RuntimeError, match="HUBSPOT_ACCESS_TOKEN"):
-            list(fetch_contacts())
+            fetch_contacts()
 
 def test_fetch_contacts_pagination(monkeypatch):
     monkeypatch.setenv("HUBSPOT_ACCESS_TOKEN", "fake-token")
@@ -24,6 +24,7 @@ def test_fetch_contacts_pagination(monkeypatch):
     mock_get_page = MagicMock(side_effect=[mock_page_1, mock_page_2])
     mock_to_dict = MagicMock(return_value=mock_raw_contact)
     
+    # Patch the indirection points in the client module
     with patch("src.integrations.hubspot.client._get_page", mock_get_page):
         with patch("src.integrations.hubspot.client._to_dict", mock_to_dict):
             results = fetch_contacts()
@@ -32,9 +33,12 @@ def test_fetch_contacts_pagination(monkeypatch):
             assert len(results) == 2
             assert results[0]["external_id"] == "hs1"
             assert mock_get_page.call_count == 2
+            
             # Check cursor passed correctly on second call
+            # call_args is (args, kwargs). [0] is args, [1] is 'after' parameter
             assert mock_get_page.call_args_list[1][0][1] == "cursor2"
-            # Check properties passed
+            
+            # Check properties list was passed
             assert "firstname" in mock_get_page.call_args_list[0][0][2]
 
 def test_fetch_contacts_api_error():
