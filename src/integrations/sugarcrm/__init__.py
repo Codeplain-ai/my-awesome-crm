@@ -1,0 +1,1 @@
+from src.integrations.sugarcrm.client import fetch_contacts
