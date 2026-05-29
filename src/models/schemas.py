@@ -18,3 +18,9 @@ class ContactRead(BaseModel):
     custom_fields: dict[str, Any]
     created_at: datetime
     updated_at: datetime
+
+class ContactListResponse(BaseModel):
+    items: list[ContactRead]
+    total: int
+    limit: int
+    offset: int
