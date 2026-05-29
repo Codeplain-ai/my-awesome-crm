@@ -1,11 +1,11 @@
 import pytest
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch
 from src.integrations.close.client import fetch_contacts
 
 @patch("src.integrations.close.client._get")
 @patch.dict("os.environ", {"CLOSE_API_KEY": "sk_test_key"})
 def test_fetch_contacts_pagination(mock_get_internal):
-    # Mock first page
+    # Mock first page and second page
     mock_get_internal.side_effect = [
         {
             "data": [{"id": "c1", "name": "Contact 1"}],
@@ -25,7 +25,7 @@ def test_fetch_contacts_pagination(mock_get_internal):
     assert mock_get_internal.call_count == 2
     
     # Check that skip parameter was incremented correctly based on data length
-    # _get(url, api_key, params) -> params is index 2
+    # _get(url, api_key, params) -> params is the 3rd argument (index 2)
     args, _ = mock_get_internal.call_args_list[1]
     assert args[2]["_skip"] == 1
 
@@ -40,4 +40,4 @@ def test_fetch_contacts_http_error(mock_get_internal):
 @patch.dict("os.environ", {}, clear=True)
 def test_fetch_contacts_no_creds():
     with pytest.raises(RuntimeError, match="CLOSE_API_KEY"):
-        list(fetch_contacts())
+        fetch_contacts()
