@@ -12,36 +12,46 @@ def _get_credentials() -> tuple[str, str]:
     base_url = os.environ.get("CLOSE_API_BASE", "https://api.close.com/api/v1")
     return api_key, base_url.rstrip("/")
 
-def _fetch_page(api_key: str, url: str, skip: int) -> Dict[str, Any]:
-    """Performs the actual HTTP request to Close API."""
+def _get(url: str, api_key: str, params: dict) -> dict:
+    """Performs a GET request to the Close API with Basic Auth."""
     response = requests.get(
-        f"{url}/contact/",
+        url,
         auth=(api_key, ""),
-        params={"_skip": skip},
+        params=params,
         timeout=30
     )
-    if not response.ok:
+    if not (200 <= response.status_code < 300):
         raise RuntimeError(
-            f"Close API request failed with status {response.status_code}: {response.text}"
+            f"Close API request failed with status {response.status_code}. "
+            f"URL: {url}, Response: {response.text}"
         )
     return response.json()
 
-def fetch_contacts() -> Iterable[Dict[str, Any]]:
+def fetch_contacts() -> List[Dict[str, Any]]:
     """
-    Discovers and yields all contacts from Close.com.
+    Discovers and returns all contacts from Close.com.
     """
     api_key, base_url = _get_credentials()
+    contacts_url = f"{base_url}/contact/"
     
+    all_contacts = []
     skip = 0
+    limit = 100
     has_more = True
     
     while has_more:
-        data = _fetch_page(api_key, base_url, skip)
-        records: List[Dict[str, Any]] = data.get("data", [])
+        params = {"_skip": skip, "_limit": limit}
+        page_data = _get(contacts_url, api_key, params)
         
-        for record in records:
-            yield close_contact_to_incoming(record)
+        data = page_data.get("data", [])
+        if not data:
+            break
             
-        has_more = data.get("has_more", False)
+        for record in data:
+            all_contacts.append(close_contact_to_incoming(record))
+            
+        has_more = page_data.get("has_more", False)
         if has_more:
-            skip += len(records)
+            skip += len(data)
+            
+    return all_contacts
