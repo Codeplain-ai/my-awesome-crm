@@ -74,3 +74,23 @@ def test_get_contacts_limit_validation(client: TestClient, monkeypatch):
     # Limit 201 should trigger FastAPI validation error (422)
     response = client.get("/contacts?limit=201", headers={"X-API-Key": "test-secret"})
     assert response.status_code == 422
+
+def test_get_contact_by_id(client: TestClient, session: Session, monkeypatch):
+    monkeypatch.setenv("CRM_API_KEY", "test-secret")
+    
+    # Seed contact
+    contact = Contact(full_name="Single Test", primary_email="single@example.com")
+    session.add(contact)
+    session.commit()
+    session.refresh(contact)
+
+    # Success case
+    response = client.get(f"/contacts/{contact.id}", headers={"X-API-Key": "test-secret"})
+    assert response.status_code == 200
+    assert response.json()["full_name"] == "Single Test"
+    assert response.json()["id"] == contact.id
+
+    # Not found case
+    response = client.get("/contacts/9999", headers={"X-API-Key": "test-secret"})
+    assert response.status_code == 404
+    assert response.json()["detail"] == "Contact not found"
