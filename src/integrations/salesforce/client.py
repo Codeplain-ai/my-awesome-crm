@@ -19,7 +19,7 @@ def _get_credentials() -> dict[str, str]:
     return creds
 
 def _build_client(creds: dict[str, str]) -> Salesforce:
-    """Indirection point for creating the Salesforce client."""
+    """Indirection point for creating the Salesforce client for testing."""
     return Salesforce(
         username=creds["username"],
         password=creds["password"],
@@ -28,14 +28,13 @@ def _build_client(creds: dict[str, str]) -> Salesforce:
     )
 
 def _run_query(sf: Salesforce, soql: str) -> dict[str, Any]:
-    """Indirection point for running the SOQL query."""
-    # query_all handles pagination automatically
+    """Indirection point for running the SOQL query for testing."""
+    # query_all handles Salesforce pagination (query_more) automatically
     return sf.query_all(soql)
 
 def fetch_contacts() -> list[dict[str, Any]]:
     """
-    Main entry point for the Salesforce integration.
-    Discovers, queries, and maps Salesforce Contacts.
+    Main entry point for the Salesforce integration discovered by the host.
     """
     creds = _get_credentials()
     sf = _build_client(creds)
@@ -45,10 +44,4 @@ def fetch_contacts() -> list[dict[str, Any]]:
     
     records = query_result.get("records", [])
     
-    incoming_contacts = []
-    for record in records:
-        # Convert the raw Salesforce dict to the unified IncomingContact dict
-        mapped = salesforce_contact_to_incoming(record)
-        incoming_contacts.append(mapped)
-        
-    return incoming_contacts
+    return [salesforce_contact_to_incoming(record) for record in records]
