@@ -1,7 +1,7 @@
 import pytest
 from src.integrations.sugarcrm.mapping import sugarcrm_contact_to_incoming
 
-def test_mapping_full_name_provided():
+def test_mapping_full_data():
     raw = {
         "id": "sugar-123",
         "full_name": "John Doe",
@@ -9,18 +9,19 @@ def test_mapping_full_name_provided():
         "phone_work": "123-456",
         "title": "Manager",
         "account_name": "Acme Corp",
-        "extra_field": "some-value"
+        "department": "Engineering"
     }
     result = sugarcrm_contact_to_incoming(raw)
-    assert result["full_name"] == "John Doe"
+    assert result["provider_id"] == "sugarcrm"
     assert result["external_id"] == "sugar-123"
+    assert result["full_name"] == "John Doe"
     assert result["primary_email"] == "john@example.com"
     assert result["phone"] == "123-456"
     assert result["job_title"] == "Manager"
     assert result["company_name"] == "Acme Corp"
-    assert result["custom_fields"]["extra_field"] == "some-value"
+    assert result["custom_fields"]["department"] == "Engineering"
 
-def test_mapping_name_fallback():
+def test_mapping_name_concatenation_fallback():
     raw = {
         "id": "sugar-456",
         "first_name": "Jane",
@@ -31,10 +32,22 @@ def test_mapping_name_fallback():
     assert result["full_name"] == "Jane Smith"
     assert result["phone"] == "987-654"
 
-def test_mapping_missing_id():
+def test_mapping_missing_required_id():
     with pytest.raises(ValueError, match="missing 'id'"):
         sugarcrm_contact_to_incoming({"full_name": "No ID"})
 
-def test_mapping_missing_name():
+def test_mapping_missing_required_name():
     with pytest.raises(ValueError, match="missing a name"):
         sugarcrm_contact_to_incoming({"id": "id-only"})
+
+def test_mapping_empty_strings_handled():
+    raw = {
+        "id": "1",
+        "full_name": "Name",
+        "email1": " ",
+        "phone_work": "",
+        "phone_mobile": None
+    }
+    result = sugarcrm_contact_to_incoming(raw)
+    assert result["primary_email"] is None
+    assert result["phone"] is None

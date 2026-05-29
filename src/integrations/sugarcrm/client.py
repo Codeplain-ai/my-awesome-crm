@@ -1,10 +1,10 @@
 import os
 import requests
-from typing import Generator, Any
+from typing import Any
 from src.integrations.sugarcrm.mapping import sugarcrm_contact_to_incoming
 
 def _token_exchange(api_base: str, client_id: str, client_secret: str, username: str, password: str, platform: str) -> str:
-    """Performs OAuth2 token exchange."""
+    """Performs OAuth2 token exchange with SugarCRM."""
     url = f"{api_base}/oauth2/token"
     payload = {
         "grant_type": "password",
@@ -18,10 +18,13 @@ def _token_exchange(api_base: str, client_id: str, client_secret: str, username:
     if not response.ok:
         raise RuntimeError(f"SugarCRM auth failed ({response.status_code}) at {url}: {response.text}")
     
-    return response.json()["access_token"]
+    try:
+        return response.json()["access_token"]
+    except (KeyError, ValueError) as e:
+        raise RuntimeError(f"SugarCRM auth response missing access_token: {str(e)}")
 
 def _get_contacts_page(api_base: str, access_token: str, offset: int) -> dict[str, Any]:
-    """Fetches a single page of contacts."""
+    """Fetches a single page of contacts using the SugarCRM offset/max_num pattern."""
     url = f"{api_base}/Contacts"
     headers = {
         "OAuth-Token": access_token,
@@ -37,7 +40,7 @@ def _get_contacts_page(api_base: str, access_token: str, offset: int) -> dict[st
 
 def fetch_contacts() -> list[dict[str, Any]]:
     """
-    Returns a list of IncomingContact dicts from SugarCRM.
+    Orchestrates the fetching and mapping of SugarCRM contacts.
     """
     api_base = os.environ.get("SUGARCRM_API_BASE", "").rstrip("/")
     username = os.environ.get("SUGARCRM_USERNAME")
@@ -57,7 +60,7 @@ def fetch_contacts() -> list[dict[str, Any]]:
 
     token = _token_exchange(api_base, client_id, client_secret, username, password, platform)
     
-    all_contacts = []
+    all_incoming_contacts = []
     offset = 0
 
     while True:
@@ -68,11 +71,17 @@ def fetch_contacts() -> list[dict[str, Any]]:
             break
 
         for record in records:
-            all_contacts.append(sugarcrm_contact_to_incoming(record))
+            all_incoming_contacts.append(sugarcrm_contact_to_incoming(record))
 
         next_offset = data.get("next_offset", -1)
+        # SugarCRM convention: returns -1 when no more records exist
         if next_offset < 0:
             break
+        
+        # Prevent infinite loops if API behaves unexpectedly
+        if next_offset == offset:
+            break
+            
         offset = next_offset
         
-    return all_contacts
+    return all_incoming_contacts

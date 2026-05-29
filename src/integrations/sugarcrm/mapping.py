@@ -3,6 +3,16 @@ from typing import Any
 def sugarcrm_contact_to_incoming(contact: dict[str, Any]) -> dict[str, Any]:
     """
     Converts a SugarCRM Contact record into an IncomingContact dict.
+    
+    Field mapping rules:
+    - provider_id: 'sugarcrm'
+    - external_id: 'id' (required)
+    - full_name: 'full_name' or 'first_name' + 'last_name' (required)
+    - primary_email: 'email1' (lowercased)
+    - phone: 'phone_work' or 'phone_mobile'
+    - job_title: 'title'
+    - company_name: 'account_name'
+    - custom_fields: All other unconsumed top-level keys
     """
     external_id = contact.get("id")
     if not external_id:
