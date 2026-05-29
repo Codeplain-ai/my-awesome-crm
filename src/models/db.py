@@ -1,9 +1,13 @@
 from datetime import datetime
 from typing import Any
-from sqlalchemy import Column, JSON
+from sqlalchemy import Column, JSON, UniqueConstraint
 from sqlmodel import Field, Relationship, SQLModel
+from pydantic import field_validator
 
 class SourceLink(SQLModel, table=True):
+    __table_args__ = (
+        UniqueConstraint("provider_id", "external_id", name="uq_sourcelink_provider_external"),
+    )
     id: int | None = Field(default=None, primary_key=True)
     provider_id: str = Field(index=True)
     external_id: str = Field(index=True)
@@ -29,3 +33,10 @@ class Contact(SQLModel, table=True):
     updated_at: datetime = Field(default_factory=datetime.utcnow)
     
     source_links: list[SourceLink] = Relationship(back_populates="contact")
+
+    @field_validator("primary_email", mode="before")
+    @classmethod
+    def lowercase_email(cls, v: Any) -> Any:
+        if isinstance(v, str):
+            return v.strip().lower() or None
+        return v
