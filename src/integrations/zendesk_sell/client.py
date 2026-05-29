@@ -3,55 +3,55 @@ import requests
 from typing import Any, Iterable
 from src.integrations.zendesk_sell.mapping import zendesk_sell_contact_to_incoming
 
-def _get_contacts_page(base_url: str, token: str, page: int) -> dict[str, Any]:
+def _get(url: str, access_token: str, params: dict) -> dict[str, Any]:
     """
-    Indirection point for HTTP GET to Zendesk Sell /contacts.
+    Indirection point for HTTP GET to Zendesk Sell.
     """
-    url = f"{base_url.rstrip('/')}/contacts"
     headers = {
-        "Authorization": f"Bearer {token}",
+        "Authorization": f"Bearer {access_token}",
         "Accept": "application/json"
     }
-    params = {
-        "page": page,
-        "per_page": 100
-    }
-    
     response = requests.get(url, headers=headers, params=params, timeout=30)
-    if not response.ok:
+    if not (200 <= response.status_code < 300):
         raise RuntimeError(
-            f"Zendesk Sell API error: {response.status_code} - {response.text} "
-            f"at URL: {url}"
+            f"Integration failed: Zendesk Sell API returned {response.status_code} "
+            f"for URL {url}. Response: {response.text}"
         )
-    
     return response.json()
 
-def fetch_contacts() -> Iterable[dict[str, Any]]:
+def fetch_contacts() -> list[dict[str, Any]]:
     """
-    Fetches person-type contacts from Zendesk Sell and yields IncomingContact dicts.
+    Fetches person-type contacts from Zendesk Sell and returns a list of IncomingContact dicts.
     """
-    token = os.environ.get("ZENDESK_SELL_ACCESS_TOKEN")
-    if not token:
+    access_token = os.environ.get("ZENDESK_SELL_ACCESS_TOKEN")
+    if not access_token:
         raise RuntimeError("Missing required environment variable: ZENDESK_SELL_ACCESS_TOKEN")
-    
-    base_url = os.environ.get("ZENDESK_SELL_API_BASE", "https://api.getbase.com/v2")
-    
+
+    api_base = os.environ.get("ZENDESK_SELL_API_BASE", "https://api.getbase.com/v2")
+    url = f"{api_base.rstrip('/')}/contacts"
+
+    all_incoming_contacts = []
     page = 1
+    per_page = 100
+
     while True:
-        data = _get_contacts_page(base_url, token, page)
+        params = {"page": page, "per_page": per_page}
+        data = _get(url, access_token, params)
         items = data.get("items", [])
-        
-        if not items:
-            break
-            
+
         for envelope in items:
             contact_data = envelope.get("data", {})
-            
-            # Per definition, we only pull person-type contacts. 
-            # In Sell, organizations have is_organization=True.
-            if contact_data.get("is_organization") is True:
+            # Unified :Contact: model is person-only. Skip organizations.
+            if contact_data.get("is_organization"):
                 continue
-                
-            yield zendesk_sell_contact_to_incoming(contact_data)
-            
+
+            incoming = zendesk_sell_contact_to_incoming(contact_data)
+            all_incoming_contacts.append(incoming)
+
+        # Stop if page is empty or we received fewer items than requested (end of collection)
+        if not items or len(items) < per_page:
+            break
+
         page += 1
+
+    return all_incoming_contacts
