@@ -1,0 +1,1 @@
+from src.integrations.zoho.client import fetch_contacts
