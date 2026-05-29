@@ -1,6 +1,6 @@
 import os
 import requests
-from typing import Any, Iterable
+from typing import Any
 from src.integrations.zendesk_sell.mapping import zendesk_sell_contact_to_incoming
 
 def _get(url: str, access_token: str, params: dict) -> dict[str, Any]:

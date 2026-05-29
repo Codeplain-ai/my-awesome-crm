@@ -29,10 +29,6 @@ def test_fetch_contacts_pagination_and_filtering(monkeypatch):
         nonlocal call_count
         p = pages[call_count]
         call_count += 1
-        # Mocking per_page behavior logic inside test
-        # Note: page1 has 2 items, page2 has 1, page3 has 0.
-        # Since per_page in client is 100, the first page (len=2) will trigger the break.
-        # To test actual multi-page looping, we'd need pages with exactly 100 items.
         return p
 
     monkeypatch.setenv("ZENDESK_SELL_ACCESS_TOKEN", "fake-token")
@@ -40,8 +36,8 @@ def test_fetch_contacts_pagination_and_filtering(monkeypatch):
 
     results = fetch_contacts()
     
-    # With per_page=100 in the client, and page1 having only 2 items:
-    # it will break after the first iteration.
-    assert len(results) == 1  # Only 1 person in page 1 (other is org)
+    # Client has per_page=100. Since page1 has only 2 items, 
+    # it breaks after 1 iteration in this test scenario.
+    assert len(results) == 1  # 1 person, 1 org skipped
     assert results[0]["external_id"] == "1"
     assert call_count == 1
