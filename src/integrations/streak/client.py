@@ -3,11 +3,12 @@ import requests
 from typing import Any, Dict, List, Iterable
 from src.integrations.streak.mapping import streak_contact_to_incoming
 
-def _get(url: str, api_key: str) -> List[Dict[str, Any]]:
+def _get(url: str, api_key: str, params: Dict[str, Any]) -> List[Dict[str, Any]]:
     """
     Indirection point for HTTP GET requests to Streak.
     """
-    response = requests.get(url, auth=(api_key, ""), timeout=30)
+    headers = {"Accept": "application/json"}
+    response = requests.get(url, auth=(api_key, ""), params=params, headers=headers, timeout=30)
     if not response.ok:
         raise RuntimeError(
             f"Streak API request failed: {response.status_code} - {response.text} URL: {url}"
@@ -25,8 +26,20 @@ def fetch_contacts() -> Iterable[Dict[str, Any]]:
     api_base = os.environ.get("STREAK_API_BASE", "https://www.streak.com/api/v2").rstrip("/")
     url = f"{api_base}/contacts"
 
-    # Streak v2 /contacts returns a list directly
-    records = _get(url, api_key)
-    
-    for record in records:
-        yield streak_contact_to_incoming(record)
+    limit = 100
+    offset = 0
+
+    while True:
+        params = {"limit": limit, "offset": offset}
+        records = _get(url, api_key, params)
+        
+        if not records:
+            break
+
+        for record in records:
+            yield streak_contact_to_incoming(record)
+        
+        if len(records) < limit:
+            break
+            
+        offset += len(records)
