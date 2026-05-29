@@ -11,7 +11,12 @@ def _first_value(contact: dict, key: str) -> str | None:
     fields = contact.get("fields", {})
     entries = fields.get(key, [])
     
+    if not isinstance(entries, list):
+        return None
+        
     for entry in entries:
+        if not isinstance(entry, dict):
+            continue
         val = entry.get("value")
         if val and isinstance(val, str):
             trimmed = val.strip()
@@ -39,7 +44,7 @@ def nimble_contact_to_incoming(contact: dict) -> dict[str, Any]:
     full_name = " ".join(name_parts).strip()
     
     if not full_name:
-        raise ValueError(f"Nimble contact {external_id} has no valid name")
+        raise ValueError(f"Nimble contact {external_id} has no valid name (first or last name)")
 
     primary_email = _first_value(contact, "email")
     if primary_email:

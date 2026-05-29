@@ -1,6 +1,6 @@
 import os
 import requests
-from typing import Generator, Any
+from typing import Any
 from src.integrations.nimble.mapping import nimble_contact_to_incoming
 
 def _get(url: str, access_token: str, params: dict) -> dict:
@@ -14,7 +14,7 @@ def _get(url: str, access_token: str, params: dict) -> dict:
     response = requests.get(url, headers=headers, params=params, timeout=30)
     if not response.ok:
         raise RuntimeError(
-            f"Nimble API error: {response.status_code} - {url} - {response.text}"
+            f"Nimble API error: {response.status_code} - URL: {url} - Body: {response.text}"
         )
     return response.json()
 
@@ -53,6 +53,7 @@ def fetch_contacts() -> list[dict[str, Any]]:
         total_pages = meta.get("pages", 1)
         current_page = meta.get("page", 1)
 
+        # Stop if we reached the last page or the current page exceeds reported total
         if current_page >= total_pages:
             break
             
