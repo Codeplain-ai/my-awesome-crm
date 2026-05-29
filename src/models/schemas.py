@@ -24,3 +24,13 @@ class ContactListResponse(BaseModel):
     total: int
     limit: int
     offset: int
+
+class IncomingContact(BaseModel):
+    provider_id: str
+    external_id: str
+    full_name: str
+    primary_email: EmailStr | None = None
+    phone: str | None = None
+    job_title: str | None = None
+    company_name: str | None = None
+    custom_fields: dict[str, Any] = {}

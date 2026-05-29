@@ -22,6 +22,22 @@ class ContactRepository:
         statement = select(Contact).where(Contact.primary_email == email.lower())
         return self.session.exec(statement).first()
 
+    def get_by_phone_and_name(self, name: str, phone: str) -> Contact | None:
+        # This is a simplified lookup for the fallback dedup key.
+        # Since we don't store a 'dedup_key' column, we match on the components.
+        # In production, we might store a hash of the dedup key for performance.
+        statement = select(Contact).where(
+            Contact.full_name == name,
+            Contact.phone == phone
+        )
+        return self.session.exec(statement).first()
+
+    def update(self, contact: Contact) -> Contact:
+        self.session.add(contact)
+        self.session.commit()
+        self.session.refresh(contact)
+        return contact
+
     def list_contacts(
         self, 
         limit: int = 50, 
