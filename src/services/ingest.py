@@ -2,7 +2,7 @@ import importlib
 import logging
 import os
 import pathlib
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import List, Callable, Any
 from src.models.schemas import IncomingContact
 from src.models.db import Contact, SourceLink
@@ -101,7 +101,7 @@ def persist_incoming_contact(
             except (IndexError, ValueError):
                 pass
 
-    now = datetime.utcnow()
+    now = datetime.now(timezone.utc)
     
     created = False
     if existing_contact:

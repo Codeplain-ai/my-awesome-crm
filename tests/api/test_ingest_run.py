@@ -1,29 +1,46 @@
 import pytest
 from fastapi.testclient import TestClient
-from sqlmodel import Session, SQLModel, create_engine
+from sqlmodel import Session, SQLModel, create_engine, StaticPool
 from src.main import app
 from src.db import get_session
+from src.models.db import SQLModel # Use the metadata from the models package
 import os
 from unittest.mock import MagicMock
 import importlib
 
-# Shared setup for tests
-engine = create_engine("sqlite://")
+@pytest.fixture(name="engine")
+def engine_fixture():
+    # Create a fresh in-memory database for every test
+    engine = create_engine(
+        "sqlite://", 
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    from src.models import db # Force import to register tables
+    SQLModel.metadata.create_all(engine)
+    yield engine
+    SQLModel.metadata.drop_all(engine)
 
-def override_get_session():
+@pytest.fixture(name="session")
+def session_fixture(engine):
     with Session(engine) as session:
         yield session
 
-app.dependency_overrides[get_session] = override_get_session
-client = TestClient(app)
-
 @pytest.fixture(autouse=True)
-def setup_db():
-    SQLModel.metadata.create_all(engine)
+def override_session(engine):
+    def get_session_override():
+        with Session(engine) as session:
+            yield session
+    
+    app.dependency_overrides[get_session] = get_session_override
     yield
-    SQLModel.metadata.drop_all(engine)
+    app.dependency_overrides.clear()
 
-def test_run_integration_success(monkeypatch, pathlib_tmpdir):
+@pytest.fixture(name="client")
+def client_fixture():
+    return TestClient(app)
+
+def test_run_integration_success(client, monkeypatch, pathlib_tmpdir):
     # Setup Auth
     monkeypatch.setenv("CRM_API_KEY", "test-secret")
     
@@ -64,7 +81,7 @@ def test_run_integration_success(monkeypatch, pathlib_tmpdir):
     assert data["fetched"] == 1
     assert data["created"] == 1
 
-def test_run_integration_not_found(monkeypatch):
+def test_run_integration_not_found(client, monkeypatch):
     monkeypatch.setenv("CRM_API_KEY", "test-secret")
     response = client.get(
         "/ingest/non_existent",
@@ -73,7 +90,7 @@ def test_run_integration_not_found(monkeypatch):
     assert response.status_code == 404
     assert "Unknown integration" in response.json()["detail"]
 
-def test_run_integration_failure_502(monkeypatch, pathlib_tmpdir):
+def test_run_integration_failure_502(client, monkeypatch, pathlib_tmpdir):
     monkeypatch.setenv("CRM_API_KEY", "test-secret")
     
     integration_name = "failing_crm"
