@@ -3,20 +3,24 @@ import requests
 from typing import Generator, Any
 from src.integrations.nimble.mapping import nimble_contact_to_incoming
 
-def _get(url: str, headers: dict, params: dict) -> dict:
+def _get(url: str, access_token: str, params: dict) -> dict:
     """
     Indirection point for HTTP GET requests to allow testing.
     """
+    headers = {
+        "Authorization": f"Bearer {access_token}",
+        "Accept": "application/json"
+    }
     response = requests.get(url, headers=headers, params=params, timeout=30)
     if not response.ok:
         raise RuntimeError(
-            f"Nimble API error: {response.status_code} - {response.text} for URL: {url}"
+            f"Nimble API error: {response.status_code} - {url} - {response.text}"
         )
     return response.json()
 
-def fetch_contacts() -> Generator[dict[str, Any], None, None]:
+def fetch_contacts() -> list[dict[str, Any]]:
     """
-    Reads Nimble credentials, pages through contacts, and yields IncomingContact dicts.
+    Reads Nimble credentials, pages through contacts, and returns a list of IncomingContact dicts.
     """
     access_token = os.environ.get("NIMBLE_ACCESS_TOKEN")
     if not access_token:
@@ -25,33 +29,33 @@ def fetch_contacts() -> Generator[dict[str, Any], None, None]:
     api_base = os.environ.get("NIMBLE_API_BASE", "https://api.nimble.com/api/v1").rstrip("/")
     url = f"{api_base}/contacts"
     
-    headers = {
-        "Authorization": f"Bearer {access_token}",
-        "Accept": "application/json"
-    }
-
-    limit = 100
-    offset = 0
+    contacts = []
+    page = 1
+    per_page = 100
 
     while True:
         params = {
             "record_type": "person",
-            "limit": limit,
-            "offset": offset
+            "page": page,
+            "per_page": per_page
         }
         
-        data = _get(url, headers, params)
+        data = _get(url, access_token, params)
         resources = data.get("resources", [])
+        meta = data.get("meta", {})
         
         if not resources:
             break
 
         for record in resources:
-            yield nimble_contact_to_incoming(record)
+            contacts.append(nimble_contact_to_incoming(record))
 
-        # Nimble v1 uses offset/limit. Check if we might have more.
-        # Based on typical API behavior; if we got a full page, request the next.
-        if len(resources) < limit:
+        total_pages = meta.get("pages", 1)
+        current_page = meta.get("page", 1)
+
+        if current_page >= total_pages:
             break
             
-        offset += limit
+        page += 1
+    
+    return contacts
