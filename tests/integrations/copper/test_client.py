@@ -42,7 +42,7 @@ def test_fetch_contacts_pagination_partial_last_page(monkeypatch):
         results = list(fetch_contacts())
         
     assert len(results) == 1
-    assert len(calls) == 1 # Should stop immediately after partial page
+    assert len(calls) == 1
 
 def test_fetch_contacts_missing_creds(monkeypatch):
     monkeypatch.delenv("COPPER_API_KEY", raising=False)
@@ -54,6 +54,6 @@ def test_fetch_contacts_api_error(monkeypatch):
     monkeypatch.setenv("COPPER_USER_EMAIL", "test@example.com")
     
     with patch("src.integrations.copper.client._search") as mocked:
-        mocked.side_effect = RuntimeError("Copper API error: 500 - Internal Server Error URL: ...")
+        mocked.side_effect = RuntimeError("Copper API error: 500")
         with pytest.raises(RuntimeError, match="500"):
             list(fetch_contacts())
