@@ -19,7 +19,8 @@ def test_persist_new_contact(session: Session):
         primary_email="alice@example.com"
     )
     
-    contact = persist_incoming_contact(session, ic)
+    contact, created = persist_incoming_contact(session, ic)
+    assert created is True
     assert contact.id is not None
     assert contact.full_name == "Alice"
     
@@ -44,7 +45,8 @@ def test_persist_merge_existing(session: Session):
         phone="555-1234"
     )
     
-    merged = persist_incoming_contact(session, ic)
+    merged, created = persist_incoming_contact(session, ic)
+    assert created is False
     assert merged.id == existing.id
     assert merged.phone == "555-1234"
     

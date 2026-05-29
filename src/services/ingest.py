@@ -73,9 +73,10 @@ def discover_integrations() -> List[str]:
 def persist_incoming_contact(
     session: Session, 
     incoming: IncomingContact
-) -> Contact:
+) -> tuple[Contact, bool]:
     """
     Dedupes and persists an IncomingContact.
+    Returns a tuple of (Contact, created) where created is True if a new record was made.
     """
     contact_repo = ContactRepository(session)
     link_repo = SourceLinkRepository(session)
@@ -102,6 +103,7 @@ def persist_incoming_contact(
 
     now = datetime.utcnow()
     
+    created = False
     if existing_contact:
         logger.info(f"Merging contact {existing_contact.id} with incoming from {incoming.provider_id}")
         if merge_contact_data(existing_contact, incoming):
@@ -121,6 +123,7 @@ def persist_incoming_contact(
             updated_at=now
         )
         target_contact = contact_repo.create(new_contact)
+        created = True
 
     # Upsert SourceLink
     existing_link = link_repo.get_by_provider_external_id(
@@ -141,5 +144,61 @@ def persist_incoming_contact(
         )
         session.add(new_link)
     
-    session.commit()
-    return target_contact
+    return target_contact, created
+
+def run_integration_service(session: Session, integration_name: str) -> dict[str, Any]:
+    """
+    Orchestrates the ingestion from a specific integration.
+    """
+    # 1. Check if integration exists and is valid
+    base_path = get_integrations_base_path()
+    item = base_path / integration_name
+    
+    if not item.is_dir() or item.name.startswith("_") or not (item / "__init__.py").exists():
+        raise ValueError(f"Unknown integration: {integration_name}")
+
+    try:
+        module_name = f"src.integrations.{integration_name}"
+        module = importlib.import_module(module_name)
+        fetch_fn = getattr(module, "fetch_contacts", None)
+        if not fetch_fn or not callable(fetch_fn):
+            raise ValueError(f"Unknown integration: {integration_name}")
+    except (ImportError, AttributeError):
+        raise ValueError(f"Unknown integration: {integration_name}")
+
+    # 2. Run fetch and persist in a transaction
+    fetched_count = 0
+    created_count = 0
+    updated_count = 0
+
+    try:
+        # Use a sub-transaction (nested) if session is already in one, 
+        # but here we rely on the caller's session commit/rollback.
+        contacts_iter = fetch_fn()
+        
+        for raw_item in contacts_iter:
+            fetched_count += 1
+            # Ensure the raw item is treated as IncomingContact
+            if not isinstance(raw_item, IncomingContact):
+                incoming = IncomingContact(**raw_item)
+            else:
+                incoming = raw_item
+            
+            _, created = persist_incoming_contact(session, incoming)
+            if created:
+                created_count += 1
+            else:
+                updated_count += 1
+        
+        session.commit()
+    except Exception as e:
+        session.rollback()
+        logger.error(f"Integration '{integration_name}' failed: {str(e)}", exc_info=True)
+        raise RuntimeError(f"Integration failed: {str(e)}")
+
+    return {
+        "integration": integration_name,
+        "fetched": fetched_count,
+        "created": created_count,
+        "updated": updated_count
+    }
