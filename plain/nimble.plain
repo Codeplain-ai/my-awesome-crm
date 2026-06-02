@@ -1,0 +1,76 @@
+---
+import:
+  - crm_common
+  - integration_testing
+description: "Nimble CRM Integration plug-in for the consolidated CRM backend. Adds src/integrations/nimble/ so that GET /ingest/nimble pulls Contacts from a Nimble account and persists them via the host's dedup pipeline."
+---
+
+***definitions***
+
+- :NimbleProvider: is the :Provider: identifier `nimble` - the folder name `src/integrations/nimble/` and the value used as `provider_id` on every :IncomingContact: this integration emits.
+
+- :NimbleCredentials: are the credentials required to authenticate against a Nimble CRM account, read from environment variables.
+  - `NIMBLE_ACCESS_TOKEN` - Nimble OAuth2 access token (required, sent as `Authorization: Bearer <token>`)
+  - `NIMBLE_API_BASE` - base URL of the Nimble API (optional, defaults to `https://api.nimble.com/api/v1`)
+
+- :NimbleIntegration: is the concrete :Integration: for :NimbleProvider: that pulls Nimble Contact records and yields :IncomingContact: records.
+  - Lives at `src/integrations/nimble/__init__.py` and exposes a top-level callable `fetch_contacts()`.
+  - Calls the Nimble REST API v1 directly through the `requests` library - no third-party Nimble SDK is used.
+  - Reads :NimbleCredentials: on every call (not at import time), so missing credentials surface as a runtime error - not an import-time crash that breaks the host's discovery loop.
+
+***implementation reqs***
+
+- :NimbleIntegration: should be implemented using the `requests` library.
+  - `requests` is already pinned in `requirements.txt`; no new dependency is added.
+  - All Nimble API calls target `{NIMBLE_API_BASE}` (default `https://api.nimble.com/api/v1`).
+  - All requests carry `Authorization: Bearer {token}` and `Accept: application/json`.
+
+- The integration package layout under `src/integrations/nimble/` is:
+  - `__init__.py` - re-exports `fetch_contacts` from `client.py`.
+  - `client.py` - the Nimble HTTP client wrapper - reads :NimbleCredentials:, paginates through `/contacts`, and yields :IncomingContact: dicts.
+  - `mapping.py` - the pure function that converts a raw Nimble Contact record into an :IncomingContact: dict.
+
+- :UnitTests: for the Nimble integration live under `tests/integrations/nimble/` and never make real network calls.
+  - All Nimble API access goes through a single seam in `client.py` so :UnitTests: can monkey-patch / inject a fake.
+  - `mapping.py` must be tested with concrete sample Nimble Contact payloads (stored inline in the test files as Python dicts; no external fixtures).
+
+***test reqs***
+
+- :ConformanceTests: of :NimbleIntegration: live in `conformance_tests/nimble/` and target the live Nimble API.
+  - The credential variables required from the environment are `NIMBLE_ACCESS_TOKEN`.
+
+***functional specs***
+
+- Implement :NimbleIntegration:'s contact-to-:IncomingContact: mapping as a pure function `nimble_contact_to_incoming(contact: dict) -> dict` in `src/integrations/nimble/mapping.py`.
+  - Input: a dict shaped like a Nimble Contact record. Nimble stores most attributes inside a `fields` dict whose values are lists of `{"value": ..., "modifier": ...}` entries. The mapping reads attributes from `fields` using these lowercase keys: `first name`, `last name`, `email`, `phone`, `title`, `company name`.
+  - Output: an :IncomingContact: dict with keys `provider_id`, `external_id`, `full_name`, `primary_email`, `phone`, `job_title`, `company_name`, `custom_fields`.
+  - Helper: define a private helper `_first_value(contact: dict, key: str) -> str | None` that returns the `value` of the first entry in `contact["fields"][key]` whose `value` is non-empty, trimmed; returns `None` when the key is missing or every entry is empty.
+  - Field mapping rules:
+    - `provider_id` is always the literal string `nimble` (matches :NimbleProvider:).
+    - `external_id` is the top-level Nimble `id` field (required - raise `ValueError` if missing or empty).
+    - `full_name` is built from `_first_value(contact, "first name")` and `_first_value(contact, "last name")` joined by a single space, with surrounding whitespace stripped.
+      - If both are missing or empty, raise `ValueError` because :IncomingContact: requires a non-empty `full_name`.
+    - `primary_email` is `_first_value(contact, "email")`, lowercased.
+    - `phone` is `_first_value(contact, "phone")` as-is.
+    - `job_title` is `_first_value(contact, "title")`.
+    - `company_name` is `_first_value(contact, "company name")`.
+  - `custom_fields` captures every top-level key on the input dict other than `id` and `fields`, plus a `fields` sub-dict that includes every Nimble `fields` key not consumed by the unified schema above (i.e. not in `{first name, last name, email, phone, title, company name}`). The unconsumed `fields` entries are copied verbatim under `custom_fields["fields"]`.
+
+- Implement :NimbleIntegration:'s client wrapper in `src/integrations/nimble/client.py`.
+  - It exposes one top-level callable `fetch_contacts()` that returns a list of :IncomingContact: dicts.
+  - On each call:
+    - Read :NimbleCredentials: from environment variables. If `NIMBLE_ACCESS_TOKEN` is missing or empty, raise `RuntimeError` with a message naming the missing variable.
+    - Build the contacts URL `{NIMBLE_API_BASE}/contacts`.
+    - Page through all contacts using Nimble's `page` / `per_page` query params:
+      - Initial request: `GET .../contacts?page=1&per_page=100&record_type=person` with `Authorization: Bearer <token>` and `Accept: application/json`.
+      - Each response is a JSON object with `resources` (list of contacts) and `meta` (object containing `pages` (int) and `page` (int)).
+      - After processing each page, continue with `page = page + 1` while `page < meta.pages`.
+      - Stop when `resources` is empty or the current page equals or exceeds `meta.pages`.
+    - For each record in `resources`, pass it through `nimble_contact_to_incoming` from `mapping.py` and append to the returned list.
+    - If any HTTP response has a non-2xx status code, raise `RuntimeError` with the status code, the URL, and the response body included in the message.
+  - The HTTP call must be reachable through one indirection point - a module-level function `_get(url: str, access_token: str, params: dict) -> dict` that performs `requests.get(...)` with the required headers, raises on non-2xx, and returns the parsed JSON. :UnitTests: monkey-patch `_get` to inject canned responses without touching the network.
+
+- Wire :NimbleIntegration: into the host's runtime discovery surface.
+  - `src/integrations/nimble/__init__.py` re-exports `fetch_contacts` from `client.py` (the file consists of one line: `from src.integrations.nimble.client import fetch_contacts`).
+  - No new entries are added to `requirements.txt`.
+  - The host's existing `GET /ingest/{integration}` endpoint will discover the integration by name `nimble` and invoke `fetch_contacts()` per the host's contract - no host-side code changes are required.

@@ -1,0 +1,1 @@
+from src.integrations.close.client import fetch_contacts

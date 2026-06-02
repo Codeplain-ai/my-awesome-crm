@@ -1,0 +1,83 @@
+---
+import:
+  - crm_common
+  - integration_testing
+description: "Copper CRM Integration plug-in for the consolidated CRM backend. Adds src/integrations/copper/ so that GET /ingest/copper pulls People records from a Copper account and persists them via the host's dedup pipeline."
+---
+
+***definitions***
+
+- :CopperProvider: is the :Provider: identifier `copper` - the folder name `src/integrations/copper/` and the value used as `provider_id` on every :IncomingContact: this integration emits.
+
+- :CopperCredentials: are the credentials required to authenticate against a Copper CRM account, read from environment variables.
+  - `COPPER_API_KEY` - Copper API key (required, sent as the `X-PW-AccessToken` header)
+  - `COPPER_USER_EMAIL` - the email address of the Copper user the API key belongs to (required, sent as the `X-PW-UserEmail` header)
+  - `COPPER_API_BASE` - base URL of the Copper API (optional, defaults to `https://api.copper.com/developer_api/v1`)
+
+- :CopperIntegration: is the concrete :Integration: for :CopperProvider: that pulls Copper People records and yields :IncomingContact: records.
+  - Lives at `src/integrations/copper/__init__.py` and exposes a top-level callable `fetch_contacts()`.
+  - Calls the Copper REST API v1 directly through the `requests` library - no third-party Copper SDK is used.
+  - Reads :CopperCredentials: on every call (not at import time), so missing credentials surface as a runtime error - not an import-time crash that breaks the host's discovery loop.
+
+***implementation reqs***
+
+- :CopperIntegration: should be implemented using the `requests` library.
+  - `requests` is already pinned in `requirements.txt`; no new dependency is added.
+  - All Copper API calls target `{COPPER_API_BASE}` (default `https://api.copper.com/developer_api/v1`).
+  - All requests carry these headers:
+    - `X-PW-AccessToken: {COPPER_API_KEY}`
+    - `X-PW-Application: developer_api`
+    - `X-PW-UserEmail: {COPPER_USER_EMAIL}`
+    - `Content-Type: application/json`
+    - `Accept: application/json`
+
+- The integration package layout under `src/integrations/copper/` is:
+  - `__init__.py` - re-exports `fetch_contacts` from `client.py` (kept tiny to honour the host's discovery contract).
+  - `client.py` - the Copper HTTP client wrapper - reads :CopperCredentials:, paginates through `POST /people/search`, and yields :IncomingContact: dicts.
+  - `mapping.py` - the pure function that converts a raw Copper Person record into an :IncomingContact: dict.
+
+- :UnitTests: for the Copper integration live under `tests/integrations/copper/` and never make real network calls.
+  - All Copper API access goes through a single seam in `client.py` so :UnitTests: can monkey-patch / inject a fake.
+  - `mapping.py` must be tested with concrete sample Copper Person payloads (stored inline in the test files as Python dicts; no external fixtures).
+
+***test reqs***
+
+- :ConformanceTests: of :CopperIntegration: live in `conformance_tests/copper/` and target the live Copper API.
+  - The credential variables required from the environment are `COPPER_API_KEY` and `COPPER_USER_EMAIL`.
+
+***functional specs***
+
+- Implement :CopperIntegration:'s person-to-:IncomingContact: mapping as a pure function `copper_person_to_incoming(person: dict) -> dict` in `src/integrations/copper/mapping.py`.
+  - Input: a dict shaped like a Copper Person record (one entry of the array returned by `POST /people/search`).
+  - Output: an :IncomingContact: dict with keys `provider_id`, `external_id`, `full_name`, `primary_email`, `phone`, `job_title`, `company_name`, `custom_fields`.
+  - Field mapping rules:
+    - `provider_id` is always the literal string `copper` (matches :CopperProvider:).
+    - `external_id` is the Copper `id` field, converted to a string (required - raise `ValueError` if missing).
+    - `full_name` is the Copper `name` field when present and non-empty.
+      - If missing or empty, raise `ValueError` because :IncomingContact: requires a non-empty `full_name`.
+    - `primary_email` comes from the Copper `emails` field, a list of `{"email": ..., "category": ...}` entries.
+      - Pick the entry whose `category` equals `"work"` if present; otherwise pick the first entry that has a non-empty `email`.
+      - The chosen value is lowercased and trimmed before being returned. If no entry has a non-empty `email`, return `None`.
+    - `phone` follows the same `work`-first rule reading the Copper `phone_numbers` list (entries shaped `{"number": ..., "category": ...}`); return the chosen value as-is with no normalization, or `None` if no entry has a value.
+    - `job_title` is the Copper `title` field, or `None` when missing or empty.
+    - `company_name` is the Copper `company_name` field, or `None` when missing or empty.
+  - `custom_fields` captures every top-level key on the input dict that is **not** consumed by the unified schema above (i.e. not in `{id, name, emails, phone_numbers, title, company_name}`). The remaining keys are copied verbatim into a new dict.
+    - In particular this preserves Copper's `custom_fields` (an array of `{custom_field_definition_id, value}` entries) under that same key inside the resulting `custom_fields`, plus things like `company_id`, `assignee_id`, `contact_type_id`, `tags`, `date_created`, `date_modified`, etc.
+
+- Implement :CopperIntegration:'s client wrapper in `src/integrations/copper/client.py`.
+  - It exposes one top-level callable `fetch_contacts()` that returns a list of :IncomingContact: dicts.
+  - On each call:
+    - Read :CopperCredentials: from environment variables. If `COPPER_API_KEY` or `COPPER_USER_EMAIL` is missing or empty, raise `RuntimeError` with a message naming the missing variable.
+    - Build the search URL `{COPPER_API_BASE}/people/search` (default base is `https://api.copper.com/developer_api/v1`).
+    - Page through all people using Copper's `page_number` / `page_size` body params:
+      - Initial request: `POST .../people/search` with JSON body `{"page_number": 1, "page_size": 200, "sort_by": "name"}` and the required `X-PW-*` headers.
+      - Each response is a JSON array of Person records (Copper does not wrap the array in an envelope).
+      - After processing each page, continue with `page_number = page_number + 1` while the previous page returned exactly `page_size` items; stop as soon as a page returns fewer items than `page_size`, or when the array is empty.
+    - For each record in the response array, pass it through `copper_person_to_incoming` from `mapping.py` and append to the returned list.
+    - If any HTTP response has a non-2xx status code, raise `RuntimeError` with the status code, the URL, and the response body included in the message - this lets the host's `GET /ingest/{integration}` endpoint surface it as an HTTP 502.
+  - The HTTP call must be reachable through one indirection point - a module-level function `_search(url: str, api_key: str, user_email: str, body: dict) -> list` that performs `requests.post(...)` with the required headers, raises on non-2xx, and returns the parsed JSON body (which Copper returns as a list). :UnitTests: monkey-patch `_search` to inject canned responses without touching the network.
+
+- Wire :CopperIntegration: into the host's runtime discovery surface.
+  - `src/integrations/copper/__init__.py` re-exports `fetch_contacts` from `client.py` (the file consists of one line: `from src.integrations.copper.client import fetch_contacts`).
+  - No new entries are added to `requirements.txt`; `requests` is already pinned by an earlier integration.
+  - The host's existing `GET /ingest/{integration}` endpoint will discover the integration by name `copper` and invoke `fetch_contacts()` per the host's contract - no host-side code changes are required.

@@ -1,0 +1,1 @@
+from src.integrations.streak.client import fetch_contacts

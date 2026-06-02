@@ -1,0 +1,71 @@
+---
+import:
+  - crm_common
+  - integration_testing
+description: "HubSpot Integration plug-in for the consolidated CRM backend. Adds src/integrations/hubspot/ so that GET /ingest/hubspot pulls contacts from a HubSpot portal and persists them via the host's dedup pipeline."
+---
+
+***definitions***
+
+- :HubSpotProvider: is the :Provider: identifier `hubspot` - the folder name `src/integrations/hubspot/` and the value used as `provider_id` on every :IncomingContact: this integration emits.
+
+- :HubSpotCredentials: are the credentials required to authenticate against a HubSpot portal, read from environment variables.
+  - `HUBSPOT_ACCESS_TOKEN` - HubSpot private-app access token (required, sent as a Bearer token in the `Authorization` header)
+  - `HUBSPOT_API_BASE` - base URL of the HubSpot API (optional, defaults to `https://api.hubapi.com`)
+
+- :HubSpotIntegration: is the concrete :Integration: for :HubSpotProvider: that pulls HubSpot CRM Contact objects and yields :IncomingContact: records.
+  - Lives at `src/integrations/hubspot/__init__.py` and exposes a top-level callable `fetch_contacts()`.
+  - Uses the `hubspot-api-client` Python library to call the HubSpot CRM v3 API.
+  - Reads :HubSpotCredentials: on every call (not at import time), so missing credentials surface as a runtime error - not an import-time crash that breaks the host's discovery loop.
+
+***implementation reqs***
+
+- :HubSpotIntegration: should be implemented using the `hubspot-api-client` library (pinned in `requirements.txt` as `hubspot-api-client >= 9.0, < 13.0`).
+  - The integration uses `hubspot.HubSpot(access_token=...)` to construct the client.
+  - Contacts are fetched via `hubspot.crm.contacts.basic_api.get_page(...)` with cursor-based pagination through the `after` parameter.
+
+- The integration package layout under `src/integrations/hubspot/` is:
+  - `__init__.py` - re-exports `fetch_contacts` from `client.py` (kept tiny to honour the host's discovery contract).
+  - `client.py` - the HubSpot client wrapper - reads :HubSpotCredentials:, builds the `HubSpot` client, paginates through all contacts, and yields :IncomingContact: dicts.
+  - `mapping.py` - the pure function that converts a raw HubSpot Contact object (the `SimplePublicObject`-shaped dict the library returns) into an :IncomingContact: dict.
+
+- :UnitTests: for the HubSpot integration live under `tests/integrations/hubspot/` and never make real network calls.
+  - All HubSpot API access goes through a single seam in `client.py` so :UnitTests: can monkey-patch / inject a fake.
+  - `mapping.py` must be tested with concrete sample HubSpot Contact payloads (stored inline in the test files as Python dicts; no external fixtures).
+
+***test reqs***
+
+- :ConformanceTests: of :HubSpotIntegration: live in `conformance_tests/hubspot/` and target the live HubSpot API.
+  - The credential variables required from the environment are `HUBSPOT_ACCESS_TOKEN`.
+
+***functional specs***
+
+- Implement :HubSpotIntegration:'s HubSpot-contact-to-:IncomingContact: mapping as a pure function `hubspot_contact_to_incoming(hs_contact: dict) -> dict` in `src/integrations/hubspot/mapping.py`.
+  - Input: a dict shaped like a HubSpot CRM v3 Contact - has a top-level `id` key and a `properties` dict with HubSpot property names as keys.
+  - Output: an :IncomingContact: dict with keys `provider_id`, `external_id`, `full_name`, `primary_email`, `phone`, `job_title`, `company_name`, `custom_fields`.
+  - Field mapping rules:
+    - `provider_id` is always the literal string `hubspot` (matches :HubSpotProvider:).
+    - `external_id` is the top-level HubSpot `id` field (required - raise `ValueError` if missing or empty).
+    - `full_name` is built from `properties.firstname` and `properties.lastname` joined by a single space, with surrounding whitespace stripped.
+      - If both are missing or empty, fall back to `properties.email` (the local-part before `@`).
+      - If still empty, raise `ValueError` because :IncomingContact: requires a non-empty `full_name`.
+    - `primary_email` is `properties.email`, lowercased and trimmed, or `None` when the field is missing or empty.
+    - `phone` is `properties.phone`, as-is, or `None` when missing or empty.
+    - `job_title` is `properties.jobtitle`, or `None` when missing or empty.
+    - `company_name` is `properties.company`, or `None` when missing or empty.
+  - `custom_fields` captures every key under `properties` that is **not** consumed by the unified schema above (i.e. not in `{firstname, lastname, email, phone, jobtitle, company}`). The remaining keys are copied verbatim into a new dict.
+
+- Implement :HubSpotIntegration:'s client wrapper in `src/integrations/hubspot/client.py`.
+  - It exposes one top-level callable `fetch_contacts()` that returns a list of :IncomingContact: dicts.
+  - On each call:
+    - Read :HubSpotCredentials: from environment variables. If `HUBSPOT_ACCESS_TOKEN` is missing or empty, raise `RuntimeError` with a message naming the missing variable.
+    - Construct a `hubspot.HubSpot(access_token=...)` client. When `HUBSPOT_API_BASE` is set, also pass it through the library's `api_client.configuration.host` field; otherwise leave the library's default base URL in place.
+    - Request the unified-schema properties explicitly via `properties=["firstname", "lastname", "email", "phone", "jobtitle", "company"]` so HubSpot returns them even when they are not in the portal's default property set.
+    - Page through all contacts: call `hubspot.crm.contacts.basic_api.get_page(limit=100, after=<cursor>, properties=<list above>)`, follow `paging.next.after` cursors until no more pages remain, accumulating the records.
+    - For each record, convert it to a plain dict (the `SimplePublicObject` returned by the library exposes `.to_dict()` - use that) and pass it through `hubspot_contact_to_incoming` from `mapping.py`, appending to the returned list.
+  - The HubSpot client constructor, the `get_page` call, and the `.to_dict()` conversion must each be reachable through one indirection point (e.g. module-level functions `_build_client()`, `_get_page(client, after, properties)`, `_to_dict(obj)`) so :UnitTests: can monkey-patch them without touching the real `hubspot-api-client` library.
+
+- Wire :HubSpotIntegration: into the host's runtime discovery surface.
+  - `src/integrations/hubspot/__init__.py` re-exports `fetch_contacts` from `client.py` (the file consists of one line: `from src.integrations.hubspot.client import fetch_contacts`).
+  - `hubspot-api-client` is added to `requirements.txt` with an explicit version pin (`hubspot-api-client >= 9.0, < 13.0`).
+  - The host's existing `GET /ingest/{integration}` endpoint will discover the integration by name `hubspot` and invoke `fetch_contacts()` per the host's contract - no host-side code changes are required.

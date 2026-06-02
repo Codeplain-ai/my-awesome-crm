@@ -1,0 +1,76 @@
+---
+import:
+  - crm_common
+  - integration_testing
+description: "Streak Integration plug-in for the consolidated CRM backend. Adds src/integrations/streak/ so that GET /ingest/streak pulls Contacts from a Streak account and persists them via the host's dedup pipeline."
+---
+
+***definitions***
+
+- :StreakProvider: is the :Provider: identifier `streak` - the folder name `src/integrations/streak/` and the value used as `provider_id` on every :IncomingContact: this integration emits.
+
+- :StreakCredentials: are the credentials required to authenticate against a Streak account, read from environment variables.
+  - `STREAK_API_KEY` - Streak API key (required, sent as the HTTP Basic auth username with an empty password)
+  - `STREAK_API_BASE` - base URL of the Streak API (optional, defaults to `https://www.streak.com/api/v2`)
+
+- :StreakIntegration: is the concrete :Integration: for :StreakProvider: that pulls Streak Contact records and yields :IncomingContact: records.
+  - Lives at `src/integrations/streak/__init__.py` and exposes a top-level callable `fetch_contacts()`.
+  - Calls the Streak REST API v2 directly through the `requests` library - no third-party Streak SDK is used.
+  - Reads :StreakCredentials: on every call (not at import time), so missing credentials surface as a runtime error - not an import-time crash that breaks the host's discovery loop.
+
+***implementation reqs***
+
+- :StreakIntegration: should be implemented using the `requests` library.
+  - `requests` is already pinned in `requirements.txt`; no new dependency is added.
+  - All Streak API calls target `{STREAK_API_BASE}` (default `https://www.streak.com/api/v2`).
+  - Authentication is HTTP Basic: the API key is the username and the password is the empty string. Use `auth=(api_key, "")` on every `requests` call.
+
+- The integration package layout under `src/integrations/streak/` is:
+  - `__init__.py` - re-exports `fetch_contacts` from `client.py`.
+  - `client.py` - the Streak HTTP client wrapper - reads :StreakCredentials:, paginates through `/contacts`, and yields :IncomingContact: dicts.
+  - `mapping.py` - the pure function that converts a raw Streak Contact record into an :IncomingContact: dict.
+
+- :UnitTests: for the Streak integration live under `tests/integrations/streak/` and never make real network calls.
+  - All Streak API access goes through a single seam in `client.py` so :UnitTests: can monkey-patch / inject a fake.
+  - `mapping.py` must be tested with concrete sample Streak Contact payloads (stored inline in the test files as Python dicts; no external fixtures).
+
+***test reqs***
+
+- :ConformanceTests: of :StreakIntegration: live in `conformance_tests/streak/` and target the live Streak API.
+  - The credential variables required from the environment are `STREAK_API_KEY`.
+
+***functional specs***
+
+- Implement :StreakIntegration:'s contact-to-:IncomingContact: mapping as a pure function `streak_contact_to_incoming(contact: dict) -> dict` in `src/integrations/streak/mapping.py`.
+  - Input: a dict shaped like a Streak Contact record (one entry of the array returned by `GET /contacts`).
+  - Output: an :IncomingContact: dict with keys `provider_id`, `external_id`, `full_name`, `primary_email`, `phone`, `job_title`, `company_name`, `custom_fields`.
+  - Field mapping rules:
+    - `provider_id` is always the literal string `streak` (matches :StreakProvider:).
+    - `external_id` is the Streak `key` field (Streak uses `key`, not `id`, for record identifiers; required - raise `ValueError` if missing or empty).
+    - `full_name` is the Streak `fullName` field when present and non-empty.
+      - Otherwise fall back to concatenating `givenName` and `familyName` separated by a single space, with surrounding whitespace stripped.
+      - If still empty, raise `ValueError` because :IncomingContact: requires a non-empty `full_name`.
+    - `primary_email` comes from the Streak `emailAddresses` field, a list of strings.
+      - Pick the first non-empty string. The chosen value is lowercased and trimmed before being returned. Return `None` when the list is empty or every entry is empty.
+    - `phone` follows the same rule reading the Streak `phoneNumbers` list (also a list of strings); the chosen value is returned as-is with no normalization, or `None` if no entry has a value.
+    - `job_title` is the Streak `title` field, or `None` when missing or empty.
+    - `company_name` is the Streak `companyName` field, or `None` when missing or empty.
+  - `custom_fields` captures every top-level key on the input dict that is **not** consumed by the unified schema above (i.e. not in `{key, fullName, givenName, familyName, emailAddresses, phoneNumbers, title, companyName}`). The remaining keys are copied verbatim into a new dict.
+
+- Implement :StreakIntegration:'s client wrapper in `src/integrations/streak/client.py`.
+  - It exposes one top-level callable `fetch_contacts()` that returns a list of :IncomingContact: dicts.
+  - On each call:
+    - Read :StreakCredentials: from environment variables. If `STREAK_API_KEY` is missing or empty, raise `RuntimeError` with a message naming the missing variable.
+    - Build the contacts URL `{STREAK_API_BASE}/contacts` (default base is `https://www.streak.com/api/v2`).
+    - Page through all contacts using Streak's `limit` / `offset` query params:
+      - Initial request: `GET .../contacts?limit=100&offset=0` with `auth=(STREAK_API_KEY, "")` and `Accept: application/json`.
+      - Each response is a JSON array of Contact records (Streak does not wrap the array in an envelope at this endpoint).
+      - After processing each page, continue with `offset = offset + len(received)` while the previous page returned exactly `limit` items; stop as soon as a page returns fewer items than `limit`, or when the array is empty.
+    - For each record in the response array, pass it through `streak_contact_to_incoming` from `mapping.py` and append to the returned list.
+    - If any HTTP response has a non-2xx status code, raise `RuntimeError` with the status code, the URL, and the response body included in the message.
+  - The HTTP call must be reachable through one indirection point - a module-level function `_get(url: str, api_key: str, params: dict) -> list` that performs `requests.get(url, params=params, auth=(api_key, ""))`, raises on non-2xx, and returns the parsed JSON body (a list). :UnitTests: monkey-patch `_get` to inject canned responses without touching the network.
+
+- Wire :StreakIntegration: into the host's runtime discovery surface.
+  - `src/integrations/streak/__init__.py` re-exports `fetch_contacts` from `client.py` (the file consists of one line: `from src.integrations.streak.client import fetch_contacts`).
+  - No new entries are added to `requirements.txt`.
+  - The host's existing `GET /ingest/{integration}` endpoint will discover the integration by name `streak` and invoke `fetch_contacts()` per the host's contract - no host-side code changes are required.

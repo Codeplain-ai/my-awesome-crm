@@ -1,0 +1,1 @@
+from src.integrations.copper.client import fetch_contacts

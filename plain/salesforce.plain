@@ -1,0 +1,70 @@
+---
+import:
+  - crm_common
+  - integration_testing
+description: "Salesforce Integration plug-in for the consolidated CRM backend. Adds src/integrations/salesforce/ so that GET /ingest/salesforce pulls contacts from a Salesforce org and persists them via the host's dedup pipeline."
+---
+
+***definitions***
+
+- :SalesforceProvider: is the :Provider: identifier `salesforce` - the folder name `src/integrations/salesforce/` and the value used as `provider_id` on every :IncomingContact: this integration emits.
+
+- :SalesforceCredentials: are the credentials required to authenticate against a Salesforce org, read from environment variables.
+  - `SF_USERNAME` - Salesforce account username (required)
+  - `SF_PASSWORD` - Salesforce account password (required)
+  - `SF_SECURITY_TOKEN` - Salesforce security token appended to the password (required for non-IP-allowlisted orgs)
+  - `SF_DOMAIN` - `login` for production, `test` for sandbox (optional, defaults to `login`)
+
+- :SalesforceIntegration: is the concrete :Integration: for :SalesforceProvider: that pulls Salesforce Contact sObjects and yields :IncomingContact: records.
+  - Lives at `src/integrations/salesforce/__init__.py` and exposes a top-level callable `fetch_contacts()`.
+  - Uses the `simple-salesforce` Python library to call the Salesforce REST API.
+  - Reads :SalesforceCredentials: on every call (not at import time), so missing credentials surface as a runtime error - not an import-time crash that breaks the host's discovery loop.
+
+***implementation reqs***
+
+- :SalesforceIntegration: should be implemented using the `simple-salesforce` library (pinned in `requirements.txt`).
+  - `simple_salesforce.Salesforce(username=..., password=..., security_token=..., domain=...)` is the standard constructor.
+  - The integration uses a SOQL query against the `Contact` sObject to pull records.
+
+- The integration package layout under `src/integrations/salesforce/` is:
+  - `__init__.py` - re-exports `fetch_contacts` from `client.py` (kept tiny to honour the host's discovery contract).
+  - `client.py` - the Salesforce client wrapper - reads :SalesforceCredentials:, builds the `Salesforce` client, runs the SOQL query, paginates with `query_more`, and yields :IncomingContact: dicts.
+  - `mapping.py` - the pure function that converts a raw Salesforce Contact sObject (dict from the REST API) into an :IncomingContact: dict.
+
+- :UnitTests: for the Salesforce integration live under `tests/integrations/salesforce/` and never make real network calls.
+  - All Salesforce REST API access goes through a single seam in `client.py` so :UnitTests: can monkey-patch / inject a fake.
+  - `mapping.py` must be tested with concrete sample Salesforce Contact payloads (stored inline in the test files as Python dicts; no external fixtures).
+
+***test reqs***
+
+- :ConformanceTests: of :SalesforceIntegration: live in `conformance_tests/salesforce/` and target the live Salesforce API.
+  - The credential variables required from the environment are `SF_USERNAME`, `SF_PASSWORD`, and `SF_SECURITY_TOKEN`.
+
+***functional specs***
+
+- Implement :SalesforceIntegration:'s sObject-to-:IncomingContact: mapping as a pure function `salesforce_contact_to_incoming(sf_contact: dict) -> dict` in `src/integrations/salesforce/mapping.py`.
+  - Input: a dict shaped like the JSON `records[]` entries returned by the Salesforce REST query API for the `Contact` sObject.
+  - Output: an :IncomingContact: dict with keys `provider_id`, `external_id`, `full_name`, `primary_email`, `phone`, `job_title`, `company_name`, `custom_fields`.
+  - Field mapping rules:
+    - `provider_id` is always the literal string `salesforce` (matches :SalesforceProvider:).
+    - `external_id` is the Salesforce `Id` field (required - raise `ValueError` if missing or empty).
+    - `full_name` is the Salesforce `Name` field when present and non-empty; otherwise the concatenation of `FirstName` and `LastName` separated by a single space, with surrounding whitespace stripped; otherwise raise `ValueError` because :IncomingContact: requires a non-empty `full_name`.
+    - `primary_email` is the Salesforce `Email` field, lowercased and trimmed, or `None` when the field is missing or empty.
+    - `phone` is the Salesforce `Phone` field as-is, or `None` when missing or empty.
+    - `job_title` is the Salesforce `Title` field, or `None` when missing or empty.
+    - `company_name` is the Salesforce `Account.Name` field (nested), or `None` when missing or empty.
+  - `custom_fields` captures every Salesforce field on the input dict that is **not** consumed by the unified schema above and is **not** Salesforce's metadata `attributes` key. The remaining keys are copied verbatim into a new dict.
+
+- Implement :SalesforceIntegration:'s client wrapper in `src/integrations/salesforce/client.py`.
+  - It exposes one top-level callable `fetch_contacts()` that returns a list of :IncomingContact: dicts.
+  - On each call:
+    - Read :SalesforceCredentials: from environment variables. If any required variable is missing or empty, raise `RuntimeError` with a message naming the missing variable.
+    - Construct a `simple_salesforce.Salesforce` client using those credentials and the `SF_DOMAIN` env var (defaulting to `login` when unset).
+    - Run the SOQL query `SELECT Id, Name, FirstName, LastName, Email, Phone, Title, Account.Name FROM Contact` via `sf.query_all(...)` which transparently handles Salesforce's pagination.
+    - For each record in the result, pass it through `salesforce_contact_to_incoming` from `mapping.py` and append to the returned list.
+  - The Salesforce client constructor and the `query_all` call must be reachable through one indirection point (e.g. a module-level function `_build_client()` and a `_run_query(sf, soql)` function) so :UnitTests: can monkey-patch them without touching the real `simple_salesforce` library.
+
+- Wire :SalesforceIntegration: into the host's runtime discovery surface.
+  - `src/integrations/salesforce/__init__.py` re-exports `fetch_contacts` from `client.py` (the file consists of one line: `from src.integrations.salesforce.client import fetch_contacts`).
+  - `simple-salesforce` is added to `requirements.txt` with an explicit version pin (`simple-salesforce >= 1.12, < 2.0`).
+  - The host's existing `GET /ingest/{integration}` endpoint will discover the integration by name `salesforce` and invoke `fetch_contacts()` per the host's contract - no host-side code changes are required.

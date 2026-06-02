@@ -1,0 +1,77 @@
+---
+import:
+  - crm_common
+  - integration_testing
+description: "Zendesk Sell Integration plug-in for the consolidated CRM backend. Adds src/integrations/zendesk_sell/ so that GET /ingest/zendesk_sell pulls person Contacts from a Zendesk Sell account and persists them via the host's dedup pipeline."
+---
+
+***definitions***
+
+- :ZendeskSellProvider: is the :Provider: identifier `zendesk_sell` - the folder name `src/integrations/zendesk_sell/` and the value used as `provider_id` on every :IncomingContact: this integration emits.
+
+- :ZendeskSellCredentials: are the credentials required to authenticate against a Zendesk Sell account, read from environment variables.
+  - `ZENDESK_SELL_ACCESS_TOKEN` - OAuth2 access token issued by Zendesk Sell (required, sent as `Authorization: Bearer <token>`)
+  - `ZENDESK_SELL_API_BASE` - base URL of the Sell API (optional, defaults to `https://api.getbase.com/v2`)
+
+- :ZendeskSellIntegration: is the concrete :Integration: for :ZendeskSellProvider: that pulls person-type Contacts from Zendesk Sell and yields :IncomingContact: records.
+  - Lives at `src/integrations/zendesk_sell/__init__.py` and exposes a top-level callable `fetch_contacts()`.
+  - Calls the Zendesk Sell REST API v2 directly through the `requests` library - no third-party Zendesk SDK is used.
+  - Reads :ZendeskSellCredentials: on every call (not at import time), so missing credentials surface as a runtime error - not an import-time crash that breaks the host's discovery loop.
+
+***implementation reqs***
+
+- :ZendeskSellIntegration: should be implemented using the `requests` library.
+  - `requests` is already pinned in `requirements.txt`; no new dependency is added.
+  - All Zendesk Sell API calls target `{ZENDESK_SELL_API_BASE}` (default `https://api.getbase.com/v2`).
+  - All requests carry the headers `Authorization: Bearer {token}` and `Accept: application/json`.
+
+- The integration package layout under `src/integrations/zendesk_sell/` is:
+  - `__init__.py` - re-exports `fetch_contacts` from `client.py` (kept tiny to honour the host's discovery contract).
+  - `client.py` - the Zendesk Sell HTTP client wrapper - reads :ZendeskSellCredentials:, paginates through `/contacts`, filters out organizations, and yields :IncomingContact: dicts.
+  - `mapping.py` - the pure function that converts a raw Zendesk Sell Contact record (the inner `data` dict of one envelope in the `items[]` array of the API response) into an :IncomingContact: dict.
+
+- :UnitTests: for the Zendesk Sell integration live under `tests/integrations/zendesk_sell/` and never make real network calls.
+  - All Zendesk Sell API access goes through a single seam in `client.py` so :UnitTests: can monkey-patch / inject a fake.
+  - `mapping.py` must be tested with concrete sample Zendesk Sell Contact payloads (stored inline in the test files as Python dicts; no external fixtures).
+
+***test reqs***
+
+- :ConformanceTests: of :ZendeskSellIntegration: live in `conformance_tests/zendesk_sell/` and target the live Zendesk Sell API.
+  - The credential variables required from the environment are `ZENDESK_SELL_ACCESS_TOKEN`.
+
+***functional specs***
+
+- Implement :ZendeskSellIntegration:'s contact-to-:IncomingContact: mapping as a pure function `zendesk_sell_contact_to_incoming(contact: dict) -> dict` in `src/integrations/zendesk_sell/mapping.py`.
+  - Input: a dict shaped like a Zendesk Sell Contact record - the inner `data` object of one envelope from the `items[]` array returned by `GET /v2/contacts`.
+  - Output: an :IncomingContact: dict with keys `provider_id`, `external_id`, `full_name`, `primary_email`, `phone`, `job_title`, `company_name`, `custom_fields`.
+  - Field mapping rules:
+    - `provider_id` is always the literal string `zendesk_sell` (matches :ZendeskSellProvider:).
+    - `external_id` is the Sell `id` field, converted to a string (required - raise `ValueError` if missing).
+    - `full_name` is the Sell `name` field when present and non-empty.
+      - Otherwise fall back to concatenating `first_name` and `last_name` separated by a single space, with surrounding whitespace stripped.
+      - If still empty, raise `ValueError` because :IncomingContact: requires a non-empty `full_name`.
+    - `primary_email` is the Sell `email` field, lowercased and trimmed, or `None` when the field is missing or empty.
+    - `phone` is the Sell `phone` field as-is (no normalization), or `None` when missing or empty.
+    - `job_title` is the Sell `title` field, or `None` when missing or empty.
+    - `company_name` is the Sell `organization_name` field, or `None` when missing or empty.
+  - `custom_fields` captures every top-level key on the input dict that is **not** consumed by the unified schema above (i.e. not in `{id, name, first_name, last_name, email, phone, title, organization_name}`). The remaining keys are copied verbatim into a new dict.
+    - In particular this preserves Sell's `is_organization`, `organization_id`, and the Sell-side `custom_fields` dict under that same key inside the resulting `custom_fields`.
+
+- Implement :ZendeskSellIntegration:'s client wrapper in `src/integrations/zendesk_sell/client.py`.
+  - It exposes one top-level callable `fetch_contacts()` that returns a list of :IncomingContact: dicts.
+  - On each call:
+    - Read :ZendeskSellCredentials: from environment variables. If `ZENDESK_SELL_ACCESS_TOKEN` is missing or empty, raise `RuntimeError` with a message naming the missing variable.
+    - Build the contacts URL `{ZENDESK_SELL_API_BASE}/contacts` (default base is `https://api.getbase.com/v2`).
+    - Page through all contacts using Sell's `page` / `per_page` pagination:
+      - Initial request: `GET .../contacts?page=1&per_page=100` with headers `Authorization: Bearer <token>` and `Accept: application/json`.
+      - Each response is a JSON object with `items` (list of envelopes shaped `{"data": {...}, "meta": {...}}`) and a top-level `meta` block.
+      - After processing each page, continue with `page = page + 1` while the previous page returned exactly `per_page` items; stop as soon as a page returns fewer items than `per_page`, or when `items` is empty.
+    - For each envelope in `items`, take the inner `data` dict. Skip envelopes whose `data.is_organization` is truthy - the unified :Contact: model is person-only in this MVP.
+    - Pass each remaining `data` dict through `zendesk_sell_contact_to_incoming` from `mapping.py` and append to the returned list.
+    - If any HTTP response has a non-2xx status code, raise `RuntimeError` with the status code, the URL, and the response body included in the message - this lets the host's `GET /ingest/{integration}` endpoint surface it as an HTTP 502.
+  - The HTTP call must be reachable through one indirection point - a module-level function `_get(url: str, access_token: str, params: dict) -> dict` that performs `requests.get(...)` with the required headers, raises on non-2xx, and returns the parsed JSON. :UnitTests: monkey-patch `_get` to inject canned responses without touching the network.
+
+- Wire :ZendeskSellIntegration: into the host's runtime discovery surface.
+  - `src/integrations/zendesk_sell/__init__.py` re-exports `fetch_contacts` from `client.py` (the file consists of one line: `from src.integrations.zendesk_sell.client import fetch_contacts`).
+  - No new entries are added to `requirements.txt`; `requests` is already pinned by an earlier integration.
+  - The host's existing `GET /ingest/{integration}` endpoint will discover the integration by name `zendesk_sell` and invoke `fetch_contacts()` per the host's contract - no host-side code changes are required.
