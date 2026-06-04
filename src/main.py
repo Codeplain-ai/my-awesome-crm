@@ -5,7 +5,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI, Depends
 from pythonjsonlogger import jsonlogger
 
-from src.config import settings
+from src.config import settings, load_dotenv
 from src.db import engine
 from sqlmodel import SQLModel
 from src.api import health, contacts, ingest
@@ -25,7 +25,11 @@ def setup_logging():
 async def lifespan(app: FastAPI):
     setup_logging()
     logger = logging.getLogger("crm.startup")
-    
+
+    # 0. Load secrets from .env into the environment before anything reads them.
+    #    A missing .env is fine; shell / CI environment variables take precedence.
+    load_dotenv()
+
     # 1. Validate Config
     if not settings.CRM_API_KEY:
         logger.error("CRM_API_KEY environment variable is not set")

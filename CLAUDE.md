@@ -9,6 +9,31 @@ The authoritative authoring rules live in `.claude/rules/`. **Read them and obey
 file does not restate them. It captures only the hard-won lessons the rules alone did not prevent,
 and points back to the rule that governs each one.
 
+## Always load the ***plain reference first
+
+**At the start of every session, before doing anything else in this project, invoke the
+`/load-plain-reference` skill** to pull the full ***plain language reference (PLAIN_REFERENCE.md) into
+context. This is mandatory — do it once per session before authoring, editing, reviewing, or debugging
+any `.plain` content, and before invoking any other plain-forge skill.
+
+## Skills to refrain from using
+
+Do **not** invoke any of the following skills in this project:
+
+- `/forge-plain`
+- `/add-feature`
+- `/add-functional-spec`
+- `/analyze-if-func-spec-too-complex`
+- `/analyze-2-func-specs`
+- `/add-test-requirement`
+- `/add-test-requirement`
+- `/add-functional-specs`
+- `/add-test-requirement`
+- `/add-implementation-requirement`
+- `/add-concept`
+
+**When building a new integration, always run `/plain-healthcheck` at the end.**
+
 ## North star: render green on the FIRST `codeplain` run
 
 The goal for every new integration is a clean render with **no mid-render stop-edit-rerender**. A
@@ -55,6 +80,31 @@ otherwise guess constructor kwargs and method names and get them wrong.
 source files are instead linked in place per `integration-embedded.md` § *Link host files at their
 original path*), and pin the exact API surface — constructor kwargs, method names, token calls — in
 `***implementation reqs***`.
+
+## Declare which dependencies are already available in the system — don't assume
+
+The host environment (`requirements.txt`) is the **only** set of packages the rendered integration
+can rely on. The renderer cannot see what is installed; if the specs don't say it, it will guess —
+and a guess that names an absent package, or re-adds one the host already ships, surfaces only at
+runtime (import error) or as an avoidable second pin. `integration-embedded.md` § *The host codebase
+dictates the tech stack* makes the host manifest ground truth, and § *Discover before you ask*
+requires reading it **before** the first authoring question; this lesson makes the result explicit in
+the spec.
+
+**Rule:** as part of host discovery, enumerate the dependencies already available in the system from
+`requirements.txt`, and state them in the new integration's specs:
+
+- In `***implementation reqs***`, name the host packages the integration **reuses as-is** (e.g.
+  `requests`, `httpx`, `pydantic`) — these are already pinned by the host, so the integration must
+  **not** re-pin or re-add them (`integration-embedded.md` § *No host-overlapping reqs*).
+- Only a dependency the host does **not** already provide is added to `requirements.txt` with an
+  explicit version pin, and that addition is called out in the spec (as `simple-salesforce` is in
+  `salesforce.plain`).
+- For any newly added SDK, still pin its exact API surface per *Pin the third-party SDK API surface*
+  above — "available in the system" answers *whether* it is present, not *how* its API is shaped.
+
+This keeps the renderer from inventing imports and keeps the host manifest the single source of truth
+for what is installed.
 
 ## Probe for dirty / boundary records *before* authoring, not during render
 
