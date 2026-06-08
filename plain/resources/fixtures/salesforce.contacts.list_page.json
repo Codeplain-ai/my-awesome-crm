@@ -1,0 +1,43 @@
+{
+  "totalSize": 20,
+  "done": false,
+  "nextRecordsUrl": "/services/data/v60.0/query/01gREDACTED-2000",
+  "records": [
+    {
+      "attributes": {
+        "type": "Contact",
+        "url": "/services/data/v60.0/sobjects/Contact/003000000000001AAA"
+      },
+      "Id": "003000000000001AAA",
+      "Name": "REDACTED",
+      "FirstName": "REDACTED",
+      "LastName": "REDACTED",
+      "Email": "REDACTED",
+      "Phone": "REDACTED",
+      "MobilePhone": null,
+      "Title": "REDACTED",
+      "Account": {
+        "attributes": {
+          "type": "Account",
+          "url": "/services/data/v60.0/sobjects/Account/001000000000001AAA"
+        },
+        "Name": "REDACTED"
+      }
+    },
+    {
+      "attributes": {
+        "type": "Contact",
+        "url": "/services/data/v60.0/sobjects/Contact/003000000000002AAA"
+      },
+      "Id": "003000000000002AAA",
+      "Name": "REDACTED",
+      "FirstName": null,
+      "LastName": "REDACTED",
+      "Email": null,
+      "Phone": null,
+      "MobilePhone": "REDACTED",
+      "Title": null,
+      "Account": null
+    }
+  ]
+}

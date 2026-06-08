@@ -1,47 +1,54 @@
 import pytest
 from src.integrations.salesforce.mapping import salesforce_contact_to_incoming
 
-def test_mapping_full_payload():
-    sf_data = {
-        "attributes": {"type": "Contact", "url": "/003P000001AmXYZ"},
-        "Id": "003P000001AmXYZ",
-        "Name": "John Doe",
-        "Email": " JOHN.doe@Example.com ",
-        "Phone": "+1-555-010-999",
-        "Title": "Chief Officer",
-        "Account": {"Name": "Acme Corp"},
-        "Custom_Score__c": 42,
-        "Department": "Engineering"
+def test_mapping_full_name_from_name():
+    raw = {
+        "Id": "0031",
+        "Name": " Jane Doe ",
+        "Email": "JANE@example.com",
+        "Account": {"Name": "Acme Corp"}
     }
-    
-    result = salesforce_contact_to_incoming(sf_data)
-    
-    assert result["provider_id"] == "salesforce"
-    assert result["external_id"] == "003P000001AmXYZ"
-    assert result["full_name"] == "John Doe"
-    assert result["primary_email"] == "john.doe@example.com"
-    assert result["phone"] == "+1-555-010-999"
-    assert result["job_title"] == "Chief Officer"
-    assert result["company_name"] == "Acme Corp"
-    assert result["custom_fields"] == {"Custom_Score__c": 42, "Department": "Engineering"}
+    mapped = salesforce_contact_to_incoming(raw)
+    assert mapped["full_name"] == "Jane Doe"
+    assert mapped["primary_email"] == "jane@example.com"
+    assert mapped["company_name"] == "Acme Corp"
 
-def test_mapping_name_fallback():
-    sf_data = {
-        "Id": "003P001",
-        "FirstName": " Jane ",
-        "LastName": "Smith ",
-        "Email": "jane@smith.com"
+def test_mapping_full_name_fallback():
+    raw = {
+        "Id": "0032",
+        "FirstName": "John",
+        "LastName": "Smith",
+        "Phone": "555-1234"
     }
-    
-    result = salesforce_contact_to_incoming(sf_data)
-    assert result["full_name"] == "Jane Smith"
+    mapped = salesforce_contact_to_incoming(raw)
+    assert mapped["full_name"] == "John Smith"
+    assert mapped["phone"] == "555-1234"
 
-def test_mapping_missing_id_raises():
-    sf_data = {"Name": "No ID"}
-    with pytest.raises(ValueError, match="missing required field: Id"):
-        salesforce_contact_to_incoming(sf_data)
+def test_mapping_invalid_email_becomes_none(caplog):
+    raw = {
+        "Id": "0033",
+        "Name": "Bad Email",
+        "Email": "not-an-email"
+    }
+    mapped = salesforce_contact_to_incoming(raw)
+    assert mapped["primary_email"] is None
+    assert "invalid email format" in caplog.text
 
-def test_mapping_missing_name_raises():
-    sf_data = {"Id": "003P002", "Email": "anon@example.com"}
-    with pytest.raises(ValueError, match="no valid Name, FirstName, or LastName"):
-        salesforce_contact_to_incoming(sf_data)
+def test_mapping_missing_id_raises_value_error():
+    raw = {"Name": "No ID"}
+    with pytest.raises(ValueError, match="missing a valid 'Id'"):
+        salesforce_contact_to_incoming(raw)
+
+def test_mapping_custom_fields():
+    raw = {
+        "Id": "0034",
+        "Name": "Custom Guy",
+        "Department": "Engineering",
+        "Custom_Field__c": "SpecialValue",
+        "attributes": {"type": "Contact"}
+    }
+    mapped = salesforce_contact_to_incoming(raw)
+    assert mapped["custom_fields"] == {
+        "Department": "Engineering",
+        "Custom_Field__c": "SpecialValue"
+    }

@@ -14,7 +14,7 @@ You've got contacts in Salesforce. And HubSpot. And that one in Pipedrive your c
 - 🧹 **Smart de-duplication** — matches contacts by email first, then falls back to `name + phone`. "Bob", "bob ", and "BOB" are all just Bob.
 - 🤝 **Non-destructive merging** — existing data wins; incoming data only fills in the blanks. Custom fields get a shallow merge so nothing precious is clobbered.
 - 🔗 **Source tracking** — every contact remembers exactly which provider + external ID it came from, so re-syncs update instead of duplicate.
-- 🔐 **API-key auth** — everything except the health check lives behind an `X-API-Key`.
+- 🖥️ **Built-in web UI** — open the root URL and click your way through discovery, ingestion, and the contact list. No auth, no setup.
 - 📋 **Paginated, searchable contacts API** — because nobody wants to scroll through 40,000 rows.
 
 ## 🏢 Supported CRMs (10 and counting)
@@ -44,22 +44,23 @@ Each one lives in `src/integrations/<provider>/` and just has to promise one thi
 python -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
 
-# 2. The one required secret
-export CRM_API_KEY="super-secret-please-change-me"
-
-# 3. Liftoff 🛫
+# 2. Liftoff 🛫
 uvicorn src.main:app --reload
 ```
 
-Now visit **http://localhost:8000/docs** for the interactive Swagger playground.
+Now visit:
+
+- **http://localhost:8000/** — the built-in web UI (discover → ingest → browse contacts)
+- **http://localhost:8000/docs** — the interactive Swagger playground
+
+The server itself is **unauthenticated** — there's no `X-API-Key`. The only credentials in play are the per-provider ones each integration reads from the environment when it runs.
 
 ### ⚙️ Configuration
 
-All optional except the API key:
+All optional:
 
 | Variable | Default | What it does |
 |---|---|---|
-| `CRM_API_KEY` | *(required)* | The key the app won't start without. |
 | `CRM_PORT` | `8000` | Port to serve on. |
 | `CRM_DB_PATH` | `crm.db` | Where the SQLite file lives. |
 
@@ -69,29 +70,29 @@ Provider integrations read their own credentials from the environment (e.g. `SF_
 
 ## 🎮 Taking it for a spin
 
+The easiest way is the **web UI at http://localhost:8000/** — it discovers the
+integrations, ingests them on a click, and shows the consolidated list. Or, from the terminal:
+
 ```bash
 # See which integrations the host discovered
-curl -X POST localhost:8000/ingest/discover \
-  -H "X-API-Key: $CRM_API_KEY"
+curl -X POST localhost:8000/ingest/discover
 
 # Pull everyone in from Salesforce
-curl localhost:8000/ingest/salesforce \
-  -H "X-API-Key: $CRM_API_KEY"
+curl localhost:8000/ingest/salesforce
 # → {"integration":"salesforce","fetched":42,"created":40,"updated":2}
 
 # Browse your shiny consolidated contacts
-curl "localhost:8000/contacts?limit=10&q=acme" \
-  -H "X-API-Key: $CRM_API_KEY"
+curl "localhost:8000/contacts?limit=10&q=acme"
 ```
 
 ## 🗺️ The grand tour
 
 ```
 src/
-├── main.py              # 🚪 FastAPI app + startup ritual
-├── auth.py              # 🔐 API-key gatekeeper
+├── main.py              # 🚪 FastAPI app + startup ritual + web UI route
 ├── config.py            # ⚙️  Lazy-loaded settings
 ├── db.py                # 🐘 Engine & sessions
+├── static/              # 🖥️  The single-page web UI (index.html)
 ├── api/                 # 🛣️  Routes: health, contacts, ingest
 ├── services/
 │   ├── ingest.py        # 🔍 Discovery + orchestration

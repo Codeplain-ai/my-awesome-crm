@@ -41,9 +41,6 @@ def client_fixture():
     return TestClient(app)
 
 def test_run_integration_success(client, monkeypatch, pathlib_tmpdir):
-    # Setup Auth
-    monkeypatch.setenv("CRM_API_KEY", "test-secret")
-    
     # Mock integration folder
     integration_name = "test_crm"
     integration_dir = pathlib_tmpdir / integration_name
@@ -70,11 +67,8 @@ def test_run_integration_success(client, monkeypatch, pathlib_tmpdir):
         
     monkeypatch.setattr(importlib, "import_module", mock_import)
 
-    response = client.get(
-        f"/ingest/{integration_name}",
-        headers={"X-API-Key": "test-secret"}
-    )
-    
+    response = client.get(f"/ingest/{integration_name}")
+
     assert response.status_code == 200
     data = response.json()
     assert data["integration"] == integration_name
@@ -82,17 +76,11 @@ def test_run_integration_success(client, monkeypatch, pathlib_tmpdir):
     assert data["created"] == 1
 
 def test_run_integration_not_found(client, monkeypatch):
-    monkeypatch.setenv("CRM_API_KEY", "test-secret")
-    response = client.get(
-        "/ingest/non_existent",
-        headers={"X-API-Key": "test-secret"}
-    )
+    response = client.get("/ingest/non_existent")
     assert response.status_code == 404
     assert "Unknown integration" in response.json()["detail"]
 
 def test_run_integration_failure_502(client, monkeypatch, pathlib_tmpdir):
-    monkeypatch.setenv("CRM_API_KEY", "test-secret")
-    
     integration_name = "failing_crm"
     integration_dir = pathlib_tmpdir / integration_name
     integration_dir.mkdir()
@@ -106,11 +94,8 @@ def test_run_integration_failure_502(client, monkeypatch, pathlib_tmpdir):
     
     monkeypatch.setattr(importlib, "import_module", lambda n: mock_module)
 
-    response = client.get(
-        f"/ingest/{integration_name}",
-        headers={"X-API-Key": "test-secret"}
-    )
-    
+    response = client.get(f"/ingest/{integration_name}")
+
     assert response.status_code == 502
     assert "Integration failed: API Down" in response.json()["detail"]
 

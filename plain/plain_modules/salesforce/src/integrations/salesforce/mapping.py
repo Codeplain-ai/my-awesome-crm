@@ -1,69 +1,73 @@
+import logging
 from typing import Any
+from email_validator import validate_email, EmailNotValidError
 
-def salesforce_contact_to_incoming(sf_contact: dict[str, Any]) -> dict[str, Any]:
+logger = logging.getLogger(__name__)
+
+def salesforce_contact_to_incoming(contact: dict[str, Any]) -> dict[str, Any]:
     """
-    Maps a Salesforce Contact sObject dictionary to an IncomingContact dictionary.
-    
-    :param sf_contact: Raw dictionary from Salesforce REST API.
-    :return: Dictionary matching the IncomingContact schema.
-    :raises ValueError: If required fields are missing.
+    Maps a Salesforce Contact REST API record to an IncomingContact dict.
     """
-    provider_id = "salesforce"
-    
-    # 1. External ID (Required)
-    external_id = sf_contact.get("Id")
-    if not external_id:
-        raise ValueError("Salesforce contact is missing required field: Id")
+    # 1. external_id
+    external_id = contact.get("Id")
+    if not external_id or not isinstance(external_id, str):
+        raise ValueError("Salesforce contact record is missing a valid 'Id'.")
 
-    # 2. Full Name logic (Required)
-    # Use 'Name' if present, otherwise build from FirstName and LastName
-    full_name = sf_contact.get("Name")
+    # 2. full_name
+    full_name = (contact.get("Name") or "").strip()
     if not full_name:
-        first_name = (sf_contact.get("FirstName") or "").strip()
-        last_name = (sf_contact.get("LastName") or "").strip()
-        if first_name or last_name:
-            full_name = f"{first_name} {last_name}".strip()
-    else:
-        full_name = full_name.strip()
-    
+        first = (contact.get("FirstName") or "").strip()
+        last = (contact.get("LastName") or "").strip()
+        full_name = f"{first} {last}".strip()
+
     if not full_name:
-        raise ValueError(f"Salesforce contact {external_id} has no valid Name, FirstName, or LastName")
+        raise ValueError(f"Salesforce contact {external_id} has no name fields.")
 
-    # 3. Scalar fields with normalization
-    primary_email = sf_contact.get("Email")
-    if primary_email and primary_email.strip():
-        primary_email = primary_email.strip().lower()
-    else:
-        primary_email = None
+    # 3. primary_email
+    raw_email = contact.get("Email")
+    primary_email = None
+    if raw_email:
+        raw_email = raw_email.strip()
+        try:
+            # Match host logic: lowercased, trimmed, no DNS check.
+            email_info = validate_email(raw_email, check_deliverability=False)
+            primary_email = email_info.normalized.lower()
+        except EmailNotValidError:
+            logger.warning(
+                "Salesforce contact %s has invalid email format: %s", 
+                external_id, raw_email
+            )
+            primary_email = None
 
-    phone = sf_contact.get("Phone") or None
-    job_title = sf_contact.get("Title") or None
-    
-    # 4. Nested Company Name (Account.Name)
+    # 4. phone
+    phone = contact.get("Phone") or contact.get("MobilePhone") or None
+
+    # 5. job_title
+    job_title = contact.get("Title") or None
+
+    # 6. company_name
     company_name = None
-    account = sf_contact.get("Account")
+    account = contact.get("Account")
     if isinstance(account, dict):
-        company_name = account.get("Name") or None
+        company_name = (account.get("Name") or "").strip() or None
 
-    # 5. Custom Fields extraction
-    # Exclude fields already consumed and the Salesforce 'attributes' metadata
+    # 7. custom_fields (remaining keys)
     consumed_keys = {
         "Id", "Name", "FirstName", "LastName", "Email", 
-        "Phone", "Title", "Account", "attributes"
+        "Phone", "MobilePhone", "Title", "Account", "attributes"
     }
-    
     custom_fields = {
-        k: v for k, v in sf_contact.items() 
-        if k not in consumed_keys
+        k: v for k, v in contact.items() 
+        if k not in consumed_keys and not k.startswith("attributes")
     }
 
     return {
-        "provider_id": provider_id,
+        "provider_id": "salesforce",
         "external_id": external_id,
         "full_name": full_name,
         "primary_email": primary_email,
         "phone": phone,
         "job_title": job_title,
         "company_name": company_name,
-        "custom_fields": custom_fields
+        "custom_fields": custom_fields,
     }

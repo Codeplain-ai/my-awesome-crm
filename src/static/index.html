@@ -1,0 +1,167 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>My Awesome CRM</title>
+  <style>
+    :root {
+      --bg: #0f172a; --panel: #1e293b; --line: #334155;
+      --text: #e2e8f0; --muted: #94a3b8; --accent: #38bdf8; --ok: #4ade80; --err: #f87171;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0; font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+      background: var(--bg); color: var(--text); line-height: 1.5;
+    }
+    header { padding: 24px 32px; border-bottom: 1px solid var(--line); }
+    h1 { margin: 0; font-size: 22px; }
+    h1 small { color: var(--muted); font-weight: 400; font-size: 14px; }
+    main { max-width: 960px; margin: 0 auto; padding: 24px 32px; }
+    section { margin-bottom: 32px; }
+    h2 { font-size: 14px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); }
+    .integrations { display: flex; flex-wrap: wrap; gap: 10px; }
+    button {
+      background: var(--panel); color: var(--text); border: 1px solid var(--line);
+      padding: 10px 16px; border-radius: 8px; cursor: pointer; font-size: 14px;
+      transition: border-color .15s, background .15s;
+    }
+    button:hover:not(:disabled) { border-color: var(--accent); }
+    button:disabled { opacity: .5; cursor: progress; }
+    button.refresh { background: transparent; }
+    #status { min-height: 22px; margin: 12px 0; font-size: 14px; }
+    #status.ok { color: var(--ok); }
+    #status.err { color: var(--err); }
+    .count { font-size: 28px; font-weight: 700; }
+    .count.zero { color: var(--muted); }
+    table { width: 100%; border-collapse: collapse; margin-top: 12px; }
+    th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--line); font-size: 14px; }
+    th { color: var(--muted); font-weight: 600; }
+    .sources span {
+      display: inline-block; background: var(--panel); border: 1px solid var(--line);
+      border-radius: 999px; padding: 1px 8px; font-size: 12px; margin: 1px 2px; color: var(--accent);
+    }
+    .empty { color: var(--muted); font-style: italic; padding: 16px 0; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>🦸 My Awesome CRM <small>— one contact list to rule them all</small></h1>
+  </header>
+  <main>
+    <section>
+      <h2>Integrations <button class="refresh" onclick="loadIntegrations()">↻ rediscover</button></h2>
+      <div class="integrations" id="integrations"><span class="empty">Discovering…</span></div>
+    </section>
+
+    <div id="status"></div>
+
+    <section>
+      <h2>Contacts <button class="refresh" onclick="loadContacts()">↻ refresh</button></h2>
+      <div class="count zero" id="count">—</div>
+      <div id="contacts"></div>
+    </section>
+  </main>
+
+  <script>
+    const $ = (id) => document.getElementById(id);
+
+    function setStatus(msg, kind) {
+      const el = $("status");
+      el.textContent = msg || "";
+      el.className = kind || "";
+    }
+
+    async function loadIntegrations() {
+      const box = $("integrations");
+      box.innerHTML = '<span class="empty">Discovering…</span>';
+      try {
+        // The list is whatever the server discovers at runtime — nothing hardcoded.
+        const res = await fetch("/ingest/discover", { method: "POST" });
+        if (!res.ok) throw new Error("HTTP " + res.status);
+        const { discovered } = await res.json();
+        box.innerHTML = "";
+        if (!discovered.length) {
+          box.innerHTML = '<span class="empty">No integrations found.</span>';
+          return;
+        }
+        for (const name of discovered) {
+          const btn = document.createElement("button");
+          btn.textContent = "⬇ " + name;
+          btn.onclick = () => ingest(name, btn);
+          box.appendChild(btn);
+        }
+      } catch (e) {
+        box.innerHTML = '<span class="empty">Failed to discover integrations.</span>';
+        setStatus("Discovery failed: " + e.message, "err");
+      }
+    }
+
+    async function ingest(name, btn) {
+      setStatus("Ingesting from " + name + "…", "");
+      if (btn) btn.disabled = true;
+      try {
+        const res = await fetch("/ingest/" + encodeURIComponent(name));
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.detail || ("HTTP " + res.status));
+        setStatus(
+          `✓ ${name}: fetched ${data.fetched}, created ${data.created}, updated ${data.updated}`,
+          "ok"
+        );
+        await loadContacts();
+      } catch (e) {
+        setStatus("✗ " + name + ": " + e.message, "err");
+      } finally {
+        if (btn) btn.disabled = false;
+      }
+    }
+
+    async function loadContacts() {
+      try {
+        const res = await fetch("/contacts?limit=200");
+        if (!res.ok) throw new Error("HTTP " + res.status);
+        const data = await res.json();
+        renderContacts(data);
+      } catch (e) {
+        setStatus("Failed to load contacts: " + e.message, "err");
+      }
+    }
+
+    function renderContacts({ items, total }) {
+      const count = $("count");
+      count.textContent = total + (total === 1 ? " contact" : " contacts");
+      count.className = "count" + (total === 0 ? " zero" : "");
+
+      const box = $("contacts");
+      if (!items.length) {
+        box.innerHTML = '<div class="empty">No contacts yet — ingest an integration above.</div>';
+        return;
+      }
+      const rows = items.map((c) => {
+        const sources = (c.source_links || [])
+          .map((s) => `<span>${s.provider_id}</span>`).join("");
+        return `<tr>
+          <td>${esc(c.full_name)}</td>
+          <td>${esc(c.primary_email) || "—"}</td>
+          <td>${esc(c.company_name) || "—"}</td>
+          <td class="sources">${sources || "—"}</td>
+        </tr>`;
+      }).join("");
+      box.innerHTML = `<table>
+        <thead><tr><th>Name</th><th>Email</th><th>Company</th><th>Sources</th></tr></thead>
+        <tbody>${rows}</tbody></table>`;
+    }
+
+    function esc(v) {
+      if (v == null) return "";
+      return String(v).replace(/[&<>"']/g, (ch) => ({
+        "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"
+      }[ch]));
+    }
+
+    // Boot: discover integrations, then show the (initially empty) contact list.
+    loadIntegrations();
+    loadContacts();
+  </script>
+</body>
+</html>

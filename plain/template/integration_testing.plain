@@ -8,6 +8,10 @@ description: "Shared conformance-testing requirements for every CRM integration 
   - :ConformanceTests: are executed with the `pytest` command.
   - Each integration's :ConformanceTests: live in their own folder under `conformance_tests/`, named after the integration.
 
+- :ConformanceTests: are executed via the run script [test_scripts/run_conformance_tests_python.sh](test_scripts/run_conformance_tests_python.sh) - this is the exact contract the renderer's generated tests must satisfy.
+  - The script overlays the generated integration into the host source tree and stages the conformance suite into `.tmp/python_conformance/`, leaving the authored test tree pristine.
+  - It installs the conformance suite's dependencies, then runs `pytest` with `PYTHONPATH` set to the host root so the host implementation code is what gets imported.
+
 - :ConformanceTests: run against the live provider API - provider calls are never mocked.
   - A run that never reached the provider proves nothing and must be treated as a failure.
   - :ConformanceTests: exercise the integration's `fetch_contacts()` entry point end to end against the live API.

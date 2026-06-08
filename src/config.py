@@ -53,10 +53,6 @@ class Settings:
     """Lazy-loaded settings to prevent import-time failures."""
     
     @property
-    def CRM_API_KEY(self) -> str | None:
-        return os.environ.get("CRM_API_KEY")
-
-    @property
     def CRM_PORT(self) -> int:
         return int(os.environ.get("CRM_PORT", "8000"))
 

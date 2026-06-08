@@ -94,23 +94,42 @@ fi
 # Step 5 - dependency environment. Keep the host source tree clean by housing
 # the venv under plain/.tmp/ rather than inside the host repo.
 VENV_DIR="$PLAIN_DIR/.tmp/venv"
+CREATED_VENV=0
 if [ ! -x "$VENV_DIR/bin/python" ]; then
     echo "Creating venv at $VENV_DIR"
     $PY -m venv "$VENV_DIR" || exit $?
-    "$VENV_DIR/bin/pip" install --upgrade pip >/dev/null || exit $?
+    CREATED_VENV=1
+fi
+VENV_PY="$VENV_DIR/bin/python"
+
+# Some hosts create a venv without pip (a stripped Python where ensurepip is
+# missing, or an incomplete system python3-venv package). pip must be present
+# inside the venv; try to bootstrap it with ensurepip, and if it still is not
+# available, fail fast with 69 rather than dying later with an opaque error.
+if ! "$VENV_PY" -m pip --version >/dev/null 2>&1; then
+    echo "pip not found in venv; attempting to bootstrap it with ensurepip" >&2
+    "$VENV_PY" -m ensurepip --upgrade --default-pip >/dev/null 2>&1
+fi
+if ! "$VENV_PY" -m pip --version >/dev/null 2>&1; then
+    echo "Error: pip is not available in the venv at $VENV_DIR and could not be bootstrapped." >&2
+    echo "       Install the platform's Python venv/pip support (e.g. the python3-venv package) and retry." >&2
+    exit 69
+fi
+if [ "$CREATED_VENV" -eq 1 ]; then
+    "$VENV_PY" -m pip install --upgrade pip >/dev/null || exit $?
 fi
 
 if [ -f "$HOST_CODEBASE_ROOT/requirements.txt" ]; then
-    "$VENV_DIR/bin/pip" install -r "$HOST_CODEBASE_ROOT/requirements.txt" || exit $?
+    "$VENV_PY" -m pip install -r "$HOST_CODEBASE_ROOT/requirements.txt" || exit $?
 elif [ -f "$HOST_CODEBASE_ROOT/pyproject.toml" ]; then
-    "$VENV_DIR/bin/pip" install -e "$HOST_CODEBASE_ROOT" || exit $?
+    "$VENV_PY" -m pip install -e "$HOST_CODEBASE_ROOT" || exit $?
 else
     echo "Error: no requirements.txt or pyproject.toml in $HOST_CODEBASE_ROOT" >&2
     exit 69
 fi
 
 # pytest is needed to run the suite even if the host does not declare it.
-"$VENV_DIR/bin/pip" install pytest >/dev/null || exit $?
+"$VENV_PY" -m pip install pytest >/dev/null || exit $?
 
 # Step 6 - run pytest from the host root so `from src.integrations.<name> ...`
 # resolves against the host layout, scoped to the staged integration package(s).

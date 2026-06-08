@@ -69,6 +69,39 @@ during authoring** and written as an **implementation req** so it is global from
 not let the renderer discover the policy mid-run. For the mandatory transient-vs-permanent error
 classification this builds on, see `integrations.md` § *Edge-case coverage*.
 
+## The host's own contract validation is a per-record failure mode the skip-and-log does NOT catch
+
+The integration's skip-and-log only wraps the mapping function *inside* `fetch_contacts()`. But the
+host validates every emitted record by constructing `:IncomingContact:` from it (`IncomingContact(**raw_item)`
+in `src/services/ingest.py`), and that loop **rolls back and re-raises on the first failure** — so one
+record the host rejects aborts the *entire* ingest with zero writes, and it happens *after*
+`fetch_contacts()` returns, where skip-and-log can't see it. Concretely, `primary_email` is typed as
+`EmailStr` (`src/models/schemas.py`), so a single live contact with a malformed email (e.g. a `&` in
+the domain) crashed the whole Salesforce ingest after a clean render (2026-06-08).
+
+**Rule:** the mapping must pre-validate **every field the host validates**, using the host's own
+validator, so anything it emits is guaranteed to construct cleanly into `:IncomingContact:`. For
+`primary_email`, validate with the host's `email-validator` (deliverability off, matching `EmailStr`)
+and emit `None` on failure rather than the bad value. Probe for these during the dirty-data hunt
+(`integrations.md` § *Live API must be cross-checked*) — query for malformed/boundary values of every
+host-validated field, not just empty/null required ones — so the host's contract is satisfied from
+functionality 1 instead of discovered as a post-render crash.
+
+**This is cross-cutting, not Salesforce-specific.** Every integration emits `:IncomingContact:` and
+every one is exposed to the same crash, so the guard belongs wherever it applies to all of them:
+
+- **The host schema is the field inventory.** `src/models/schemas.py` (the `:IncomingContact:` model)
+  is the single source of truth for *which* fields the host validates and *how* — read it and mirror
+  each constraint in the mapping; never reconstruct the list from memory. Today that is the `EmailStr`
+  on `primary_email` and the non-empty `full_name`, but the schema is authoritative if it changes.
+- **Reuse the host's own validator**, never a hand-rolled regex — it is the only thing guaranteed to
+  agree with what `:IncomingContact:` will accept. `email-validator` is already a host dependency
+  (`integration-embedded.md` § *No host-overlapping reqs* — do not re-pin it).
+- **The durable home is a shared `***implementation reqs***` entry in `template/crm_common.plain`**, so
+  every integration inherits the guard from functionality 1 instead of each one re-discovering the
+  crash. A per-integration fix (as done for Salesforce on 2026-06-08, confirmed working) unblocks one
+  provider but leaves the rest latent — prefer the shared req when fixing this class of bug broadly.
+
 ## Pin the third-party SDK API surface — not just the provider's REST API
 
 `integrations.md` § *Live API must be cross-checked* requires fetching and grounding the provider's

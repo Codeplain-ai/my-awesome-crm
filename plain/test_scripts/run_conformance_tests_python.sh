@@ -174,21 +174,34 @@ if ! "$PYTHON_CMD" -m venv "$VENV_DIR"; then
     exit $UNRECOVERABLE_ERROR_EXIT_CODE
 fi
 VENV_PY="$VENV_DIR/bin/python"
-VENV_PIP="$VENV_DIR/bin/pip"
 
-"$VENV_PIP" install --upgrade pip || exit $?
+# Some hosts create a venv without pip (a stripped Python where ensurepip is
+# missing, or an incomplete system python3-venv package). pip must be present
+# inside the venv; try to bootstrap it with ensurepip, and if it still is not
+# available, fail fast with 69 rather than dying later with an opaque error.
+if ! "$VENV_PY" -m pip --version >/dev/null 2>&1; then
+    printf "pip not found in venv; attempting to bootstrap it with ensurepip\n" >&2
+    "$VENV_PY" -m ensurepip --upgrade --default-pip >/dev/null 2>&1
+fi
+if ! "$VENV_PY" -m pip --version >/dev/null 2>&1; then
+    printf "Error: pip is not available in the venv at %s and could not be bootstrapped.\n" "$VENV_DIR" >&2
+    printf "       Install the platform's Python venv/pip support (e.g. the python3-venv package) and retry.\n" >&2
+    exit $UNRECOVERABLE_ERROR_EXIT_CODE
+fi
+
+"$VENV_PY" -m pip install --upgrade pip || exit $?
 
 # Host runtime deps ("from src") so the root implementation imports cleanly.
 if [ -f "$HOST_CODEBASE_ROOT/requirements.txt" ]; then
     printf "Installing host requirements from %s\n" "$HOST_CODEBASE_ROOT/requirements.txt"
-    "$VENV_PIP" install -r "$HOST_CODEBASE_ROOT/requirements.txt" || exit $?
+    "$VENV_PY" -m pip install -r "$HOST_CODEBASE_ROOT/requirements.txt" || exit $?
 fi
 # Conformance suite's own deps ("from conformance"), if it ships any.
 if [ -f "$WORKING_FOLDER/requirements.txt" ]; then
     printf "Installing conformance-suite requirements\n"
-    "$VENV_PIP" install -r "$WORKING_FOLDER/requirements.txt" || exit $?
+    "$VENV_PY" -m pip install -r "$WORKING_FOLDER/requirements.txt" || exit $?
 fi
-"$VENV_PIP" install pytest || exit $?
+"$VENV_PY" -m pip install pytest || exit $?
 
 end_time=$(date +%s)
 printf "Requirements setup completed in %s seconds\n" "$((end_time - start_time))"
