@@ -1,0 +1,9 @@
+{
+  "_http_status": 404,
+  "_body": {
+    "error": {
+      "code": "0x80040217",
+      "message": "Entity 'contact' With Id = 00000000-0000-0000-0000-000000000000 Does Not Exist"
+    }
+  }
+}

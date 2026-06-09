@@ -2,7 +2,7 @@
 
 > One contact list to rule them all. Ten CRMs walk into a bar, one tidy address book walks out.
 
-You've got contacts in Salesforce. And HubSpot. And that one in Pipedrive your coworker swore by. And — wait, is "Jon Smith", "jon smith", and "J. Smith <jon@acme.com>" the *same person*? (Spoiler: yes. And we figured that out for you.)
+You've got contacts in Salesforce. And Dynamics. And that one in Pipedrive your coworker swore by. And — wait, is "Jon Smith", "jon smith", and "J. Smith <jon@acme.com>" the *same person*? (Spoiler: yes. And we figured that out for you.)
 
 **My Awesome CRM** is a contact-aggregation service that vacuums up people from a fleet of CRM providers, deduplicates the chaos, gently merges the duplicates, and hands you one clean, consolidated list behind a tidy little API.
 
@@ -21,7 +21,7 @@ You've got contacts in Salesforce. And HubSpot. And that one in Pipedrive your c
 
 | | | |
 |---|---|---|
-| Salesforce | HubSpot | Pipedrive |
+| Salesforce | Dynamics365 | Pipedrive |
 | Zoho | Copper | Close |
 | Streak | Zendesk Sell | SugarCRM |
 | Nimble | | |

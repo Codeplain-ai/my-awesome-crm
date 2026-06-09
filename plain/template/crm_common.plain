@@ -5,7 +5,7 @@ description: Shared concepts and tech-stack implementation reqs for the consolid
 ***definitions***
 
 - :Provider: is an external CRM system that records can be pulled from.
-  - Each :Provider: has a stable string identifier (e.g. "hubspot", "salesforce", "pipedrive").
+  - Each :Provider: has a stable string identifier (e.g. "salesforce", "pipedrive").
   - The identifier is opaque to the host backend - concrete providers are added by integration modules.
 
 - :SourceLink: records a one-way link from a consolidated person record to a single :Provider:.

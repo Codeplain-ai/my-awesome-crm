@@ -13,8 +13,8 @@ def session_fixture():
 
 def test_persist_new_contact(session: Session):
     ic = IncomingContact(
-        provider_id="hubspot",
-        external_id="hs-1",
+        provider_id="pipedrive",
+        external_id="pd-1",
         full_name="Alice",
         primary_email="alice@example.com"
     )
@@ -27,8 +27,8 @@ def test_persist_new_contact(session: Session):
     # Check SourceLink
     links = session.query(SourceLink).filter_by(contact_id=contact.id).all()
     assert len(links) == 1
-    assert links[0].provider_id == "hubspot"
-    assert links[0].external_id == "hs-1"
+    assert links[0].provider_id == "pipedrive"
+    assert links[0].external_id == "pd-1"
 
 def test_persist_merge_existing(session: Session):
     # 1. Create existing

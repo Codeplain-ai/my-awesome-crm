@@ -1,1 +1,0 @@
-from src.integrations.hubspot.client import fetch_contacts

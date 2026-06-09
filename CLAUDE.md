@@ -1,7 +1,7 @@
 # my-awesome-crm — project memory
 
 A Python 3.12 / FastAPI CRM host (`src/`) with an **embedded ***plain integration project** under
-`plain/`. Each of the 10 providers is one root `.plain` module (`salesforce.plain`, `hubspot.plain`, …) that imports `crm_common` + `integration_testing` and emits a
+`plain/`. Each of the 10 providers is one root `.plain` module (`salesforce.plain`, `dynamics.plain`, …) that imports `crm_common` + `integration_testing` and emits a
 runtime-discovered plug-in at `src/integrations/<name>/` exposing `fetch_contacts()`, which returns
 normalized `:IncomingContact:` records.
 
@@ -33,6 +33,22 @@ Do **not** invoke any of the following skills in this project:
 - `/add-concept`
 
 **When building a new integration, always run `/plain-healthcheck` at the end.**
+
+## Do not create a plan when writing plain specs
+
+When authoring, editing, reviewing, or debugging any `.plain` content, **do not use the plan tool**
+and do not produce a written plan. Spec authoring is governed end-to-end by the rules in
+`.claude/rules/` and the lessons in this file — that workflow is the plan. Work the rules directly
+instead of drafting a separate one.
+
+## Ask the user before authoring — at least 3-5 questions, one at a time
+
+When building a new integration, **always ask the user at least 3-5 questions** before authoring the
+specs. Ask them **one by one** — never batch them into a single multi-question prompt — so each
+answer can inform the next question. Focus the questions on what the codebase cannot tell you: the
+provider and its API, authentication and credentials, edge cases, and the batch failure policy for
+dirty data. Everything the host already encodes is a deduction, not a question
+(`integration-embedded.md` § *Discover before you ask*).
 
 ## North star: render green on the FIRST `codeplain` run
 

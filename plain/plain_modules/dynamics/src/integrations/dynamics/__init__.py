@@ -1,0 +1,1 @@
+from src.integrations.dynamics.client import fetch_contacts

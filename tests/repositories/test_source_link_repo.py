@@ -22,10 +22,10 @@ def session_fixture():
 def test_unique_constraint_provider_external(session: Session):
     repo = SourceLinkRepository(session)
     
-    link1 = SourceLink(provider_id="hubspot", external_id="123")
+    link1 = SourceLink(provider_id="pipedrive", external_id="123")
     repo.create(link1)
-    
-    link2 = SourceLink(provider_id="hubspot", external_id="123")
+
+    link2 = SourceLink(provider_id="pipedrive", external_id="123")
     session.add(link2)
     with pytest.raises(IntegrityError):
         session.commit()

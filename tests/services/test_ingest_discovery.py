@@ -14,15 +14,15 @@ def temp_integrations_dir():
 
 def test_discover_integrations_valid(temp_integrations_dir, monkeypatch):
     # Set up a valid integration
-    hubspot_dir = temp_integrations_dir / "hubspot"
-    hubspot_dir.mkdir()
-    with open(hubspot_dir / "__init__.py", "w") as f:
+    pipedrive_dir = temp_integrations_dir / "pipedrive"
+    pipedrive_dir.mkdir()
+    with open(pipedrive_dir / "__init__.py", "w") as f:
         f.write("def fetch_contacts(): return []")
 
     # Override the path and the module lookup
     monkeypatch.setenv("CRM_INTEGRATIONS_PATH", str(temp_integrations_dir))
-    
-    # Note: import_module will still try to find 'src.integrations.hubspot'
+
+    # Note: import_module will still try to find 'src.integrations.pipedrive'
     # In a real test environment, we'd mock the importlib.import_module
     # to avoid polluting the real src namespace.
     
@@ -33,14 +33,14 @@ def test_discover_integrations_valid(temp_integrations_dir, monkeypatch):
     mock_module.fetch_contacts = lambda: []
     
     def mock_import(name):
-        if name == "src.integrations.hubspot":
+        if name == "src.integrations.pipedrive":
             return mock_module
         raise ImportError()
         
     monkeypatch.setattr(importlib, "import_module", mock_import)
     
     discovered = discover_integrations()
-    assert "hubspot" in discovered
+    assert "pipedrive" in discovered
 
 def test_discover_integrations_ignores_private(temp_integrations_dir, monkeypatch):
     # Set up a directory starting with _
