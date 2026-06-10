@@ -41,6 +41,20 @@ and do not produce a written plan. Spec authoring is governed end-to-end by the 
 `.claude/rules/` and the lessons in this file — that workflow is the plan. Work the rules directly
 instead of drafting a separate one.
 
+## The 120-char line-length rule is style-only — the renderer does not enforce it
+
+`.claude/rules/line-length.md` states a 120-char hard limit, but the `codeplain` renderer does **not**
+enforce it. The accepted, green-rendering exemplar `plain/dynamics.plain` routinely exceeds it (~39
+lines over 120, the longest ~282 chars) and renders fine.
+
+**Rule:** when authoring a new integration by mirroring `dynamics.plain`, **match its style** — keep
+every line a proper `- ` bullet (nest bullets for grouping), but do **not** spend effort splitting
+long-but-valid bullets just to hit 120. Reflowing the exemplar's long bullets to ≤120 only diverges
+from the proven pattern without benefit. The one thing the renderer genuinely rejects is a **bare
+continuation line** — any line inside a section that does not start with `- ` (see
+`line-length.md` § *Never use bare continuation lines*). Avoid those at all costs; the 120-char count
+itself is cosmetic.
+
 ## Ask the user before authoring — at least 3-5 questions, one at a time
 
 When building a new integration, **always ask the user at least 3-5 questions** before authoring the
@@ -85,6 +99,17 @@ during authoring** and written as an **implementation req** so it is global from
 not let the renderer discover the policy mid-run. For the mandatory transient-vs-permanent error
 classification this builds on, see `integrations.md` § *Edge-case coverage*.
 
+**Skip-and-log means a sync can legitimately drop a large fraction of the source records — that is
+expected, not a bug.** The dominant skip cause is contacts with no usable name (the host requires a
+non-empty `full_name` on `:IncomingContact:`). Concretely, `dynamics.plain` drops **142 of 341**
+contacts on the probed org (all 142 have `fullname`/`firstname`/`lastname` all empty, none recoverable
+via a first/last fallback), so **only ~199 sync by design**. If someone later reports "the integration
+only imports ~60% of contacts / drops 40%", treat that as the **chosen** policy, not a defect — do not
+"fix" it without re-asking the user. Each integration's exact dirty-data counts and the user's
+decision live in its `plain/resources/docs/<provider>/rest-crosscheck.md` and
+`plain/resources/fixtures/<provider>.*`; record the same for every new integration so the expected
+drop is auditable instead of looking like data loss.
+
 ## The host's own contract validation is a per-record failure mode the skip-and-log does NOT catch
 
 The integration's skip-and-log only wraps the mapping function *inside* `fetch_contacts()`. But the
@@ -98,7 +123,8 @@ the domain) crashed the whole Salesforce ingest after a clean render (2026-06-08
 **Rule:** the mapping must pre-validate **every field the host validates**, using the host's own
 validator, so anything it emits is guaranteed to construct cleanly into `:IncomingContact:`. For
 `primary_email`, validate with the host's `email-validator` (deliverability off, matching `EmailStr`)
-and emit `None` on failure rather than the bad value. Probe for these during the dirty-data hunt
+and emit `None` on failure rather than the bad value — the contact is still kept and still dedups
+(the fallback :DedupKey: is name+phone), so a bad email costs the email field, not the whole record. Probe for these during the dirty-data hunt
 (`integrations.md` § *Live API must be cross-checked*) — query for malformed/boundary values of every
 host-validated field, not just empty/null required ones — so the host's contract is satisfied from
 functionality 1 instead of discovered as a post-render crash.
