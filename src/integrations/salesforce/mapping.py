@@ -1,65 +1,73 @@
 import logging
-from typing import Any
+from typing import Any, Dict, Optional
 from email_validator import validate_email, EmailNotValidError
 
 logger = logging.getLogger(__name__)
 
-def salesforce_contact_to_incoming(contact: dict[str, Any]) -> dict[str, Any]:
+def map_contact_record(record: Dict[str, Any]) -> Dict[str, Any]:
     """
-    Maps a Salesforce Contact REST API record to an IncomingContact dict.
+    Implements the SalesforceContactMapping contract.
+    Converts a raw Salesforce Contact record into an IncomingContact dict.
     """
-    # 1. external_id
-    external_id = contact.get("Id")
-    if not external_id or not isinstance(external_id, str):
-        raise ValueError("Salesforce contact record is missing a valid 'Id'.")
+    # 1. external_id mapping
+    external_id = record.get("Id")
+    if not external_id:
+        raise ValueError("Salesforce record is missing required 'Id' field.")
 
-    # 2. full_name
-    full_name = (contact.get("Name") or "").strip()
+    # 2. full_name derivation
+    full_name: Optional[str] = None
+    sf_name = record.get("Name")
+    if sf_name and sf_name.strip():
+        full_name = sf_name.strip()
+    else:
+        first = (record.get("FirstName") or "").strip()
+        last = (record.get("LastName") or "").strip()
+        combined = f"{first} {last}".strip()
+        if combined:
+            full_name = combined
+
     if not full_name:
-        first = (contact.get("FirstName") or "").strip()
-        last = (contact.get("LastName") or "").strip()
-        full_name = f"{first} {last}".strip()
+        raise ValueError(f"Salesforce record {external_id} has no derivable name.")
 
-    if not full_name:
-        raise ValueError(f"Salesforce contact {external_id} has no name fields.")
-
-    # 3. primary_email
-    raw_email = contact.get("Email")
-    primary_email = None
-    if raw_email:
-        raw_email = raw_email.strip()
+    # 3. primary_email validation
+    primary_email: Optional[str] = None
+    raw_email = record.get("Email")
+    if raw_email and raw_email.strip():
+        email_to_check = raw_email.strip().lower()
         try:
-            # Match host logic: lowercased, trimmed, no DNS check.
-            email_info = validate_email(raw_email, check_deliverability=False)
-            primary_email = email_info.normalized.lower()
+            # check_deliverability=False as per requirements
+            valid = validate_email(email_to_check, check_deliverability=False)
+            primary_email = valid.normalized
         except EmailNotValidError:
             logger.warning(
-                "Salesforce contact %s has invalid email format: %s", 
-                external_id, raw_email
+                f"Contact {external_id} has invalid email: {raw_email}. Mapping to None."
             )
             primary_email = None
 
-    # 4. phone
-    phone = contact.get("Phone") or contact.get("MobilePhone") or None
+    # 4. phone mapping
+    phone = (record.get("Phone") or record.get("MobilePhone") or None)
 
-    # 5. job_title
-    job_title = contact.get("Title") or None
+    # 5. job_title mapping
+    job_title = (record.get("Title") or None)
 
-    # 6. company_name
-    company_name = None
-    account = contact.get("Account")
+    # 6. company_name mapping
+    company_name: Optional[str] = None
+    account = record.get("Account")
     if isinstance(account, dict):
-        company_name = (account.get("Name") or "").strip() or None
+        account_name = account.get("Name")
+        if account_name and account_name.strip():
+            company_name = account_name.strip()
 
-    # 7. custom_fields (remaining keys)
+    # 7. custom_fields and consumed keys
     consumed_keys = {
         "Id", "Name", "FirstName", "LastName", "Email", 
         "Phone", "MobilePhone", "Title", "Account", "attributes"
     }
-    custom_fields = {
-        k: v for k, v in contact.items() 
-        if k not in consumed_keys and not k.startswith("attributes")
-    }
+    
+    custom_fields = {}
+    for key, value in record.items():
+        if key not in consumed_keys:
+            custom_fields[key] = value
 
     return {
         "provider_id": "salesforce",
@@ -69,5 +77,5 @@ def salesforce_contact_to_incoming(contact: dict[str, Any]) -> dict[str, Any]:
         "phone": phone,
         "job_title": job_title,
         "company_name": company_name,
-        "custom_fields": custom_fields,
+        "custom_fields": custom_fields
     }

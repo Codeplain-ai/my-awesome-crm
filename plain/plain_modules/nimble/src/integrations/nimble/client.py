@@ -1,62 +1,51 @@
-import os
-import requests
-from typing import Any
-from src.integrations.nimble.mapping import nimble_contact_to_incoming
+import httpx
+from typing import Generator, Any
 
-def _get(url: str, access_token: str, params: dict) -> dict:
+class NimbleClient:
     """
-    Indirection point for HTTP GET requests to allow testing.
+    Client for Nimble REST API v1.
+    Handles authentication and pagination.
     """
-    headers = {
-        "Authorization": f"Bearer {access_token}",
-        "Accept": "application/json"
-    }
-    response = requests.get(url, headers=headers, params=params, timeout=30)
-    if not response.ok:
-        raise RuntimeError(
-            f"Nimble API error: {response.status_code} - URL: {url} - Body: {response.text}"
-        )
-    return response.json()
+    BASE_URL = "https://app.nimble.com/api/v1"
 
-def fetch_contacts() -> list[dict[str, Any]]:
-    """
-    Reads Nimble credentials, pages through contacts, and returns a list of IncomingContact dicts.
-    """
-    access_token = os.environ.get("NIMBLE_ACCESS_TOKEN")
-    if not access_token:
-        raise RuntimeError("Missing required environment variable: NIMBLE_ACCESS_TOKEN")
-
-    api_base = os.environ.get("NIMBLE_API_BASE", "https://api.nimble.com/api/v1").rstrip("/")
-    url = f"{api_base}/contacts"
-    
-    contacts = []
-    page = 1
-    per_page = 100
-
-    while True:
-        params = {
-            "record_type": "person",
-            "page": page,
-            "per_page": per_page
+    def __init__(self, access_token: str):
+        self.headers = {
+            "Authorization": f"Bearer {access_token}",
+            "Accept": "application/json"
         }
-        
-        data = _get(url, access_token, params)
-        resources = data.get("resources", [])
-        meta = data.get("meta", {})
-        
-        if not resources:
-            break
 
-        for record in resources:
-            contacts.append(nimble_contact_to_incoming(record))
-
-        total_pages = meta.get("pages", 1)
-        current_page = meta.get("page", 1)
-
-        # Stop if we reached the last page or the current page exceeds reported total
-        if current_page >= total_pages:
-            break
+    def list_person_contacts(self, per_page: int = 30) -> Generator[dict[str, Any], None, None]:
+        """
+        Yields raw contact records from Nimble by paginating through the list endpoint.
+        Filters for record_type=person.
+        """
+        page = 1
+        while True:
+            params = {
+                "record_type": "person",
+                "per_page": per_page,
+                "page": page
+            }
             
-        page += 1
-    
-    return contacts
+            with httpx.Client(base_url=self.BASE_URL, headers=self.headers) as client:
+                response = client.get("/contacts", params=params)
+                
+                if response.status_code == 401:
+                    raise RuntimeError("Nimble API authentication failed (401 Unauthorized)")
+                
+                response.raise_for_status()
+                data = response.json()
+                
+                resources = data.get("resources", [])
+                for record in resources:
+                    yield record
+                
+                meta = data.get("meta", {})
+                current_page = meta.get("page")
+                total_pages = meta.get("pages")
+                
+                # Stop if no resources returned or we reached/exceeded the last page
+                if not resources or current_page is None or total_pages is None or current_page >= total_pages:
+                    break
+                    
+                page += 1

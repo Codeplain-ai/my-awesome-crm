@@ -1,53 +1,103 @@
 import pytest
-from src.integrations.sugarcrm.mapping import sugarcrm_contact_to_incoming
+from src.integrations.sugarcrm.mapping import map_contact
 
-def test_mapping_full_data():
+def test_map_contact_success_standard():
     raw = {
         "id": "sugar-123",
-        "full_name": "John Doe",
-        "email1": "JOHN@example.com",
-        "phone_work": "123-456",
-        "title": "Manager",
+        "full_name": " John Doe ",
+        "email": [
+            {"email_address": "PRIMARY@example.com", "primary_address": True},
+            {"email_address": "other@example.com", "primary_address": False}
+        ],
+        "phone_work": "555-0101",
+        "title": "Director",
         "account_name": "Acme Corp",
-        "department": "Engineering"
+        "date_entered": "2023-01-01T10:00:00Z",
+        "date_modified": "2023-06-01T12:00:00Z",
+        "_acl": {"fields": {}} # Should be ignored
     }
-    result = sugarcrm_contact_to_incoming(raw)
+    result = map_contact(raw)
+    
     assert result["provider_id"] == "sugarcrm"
     assert result["external_id"] == "sugar-123"
     assert result["full_name"] == "John Doe"
-    assert result["primary_email"] == "john@example.com"
-    assert result["phone"] == "123-456"
-    assert result["job_title"] == "Manager"
+    assert result["primary_email"] == "primary@example.com"
+    assert result["phone"] == "555-0101"
+    assert result["job_title"] == "Director"
     assert result["company_name"] == "Acme Corp"
-    assert result["custom_fields"]["department"] == "Engineering"
+    assert result["custom_fields"] == {
+        "date_entered": "2023-01-01T10:00:00Z",
+        "date_modified": "2023-06-01T12:00:00Z"
+    }
 
-def test_mapping_name_concatenation_fallback():
+def test_map_contact_name_derivation_fallback():
+    # Test fallback to first/last then email
+    raw_fl = {
+        "id": "id-2",
+        "first_name": "Alice",
+        "last_name": "Smith"
+    }
+    assert map_contact(raw_fl)["full_name"] == "Alice Smith"
+
+    raw_email = {
+        "id": "id-3",
+        "email1": "no-name@example.com"
+    }
+    assert map_contact(raw_email)["full_name"] == "no-name@example.com"
+
+def test_map_contact_invalid_id_raises_value_error():
+    with pytest.raises(ValueError, match="missing 'id'"):
+        map_contact({"full_name": "No ID"})
+
+def test_map_contact_underivable_name_raises_value_error():
+    with pytest.raises(ValueError, match="no derivable full_name"):
+        map_contact({"id": "id-only"})
+
+def test_map_contact_invalid_email_becomes_none():
     raw = {
         "id": "sugar-456",
-        "first_name": "Jane",
-        "last_name": "Smith",
-        "phone_mobile": "987-654"
+        "full_name": "Bad Email User",
+        "email1": "not-an-email-at-all"
     }
-    result = sugarcrm_contact_to_incoming(raw)
-    assert result["full_name"] == "Jane Smith"
-    assert result["phone"] == "987-654"
-
-def test_mapping_missing_required_id():
-    with pytest.raises(ValueError, match="missing 'id'"):
-        sugarcrm_contact_to_incoming({"full_name": "No ID"})
-
-def test_mapping_missing_required_name():
-    with pytest.raises(ValueError, match="missing a name"):
-        sugarcrm_contact_to_incoming({"id": "id-only"})
-
-def test_mapping_empty_strings_handled():
-    raw = {
-        "id": "1",
-        "full_name": "Name",
-        "email1": " ",
-        "phone_work": "",
-        "phone_mobile": None
-    }
-    result = sugarcrm_contact_to_incoming(raw)
+    result = map_contact(raw)
+    assert result["full_name"] == "Bad Email User"
     assert result["primary_email"] is None
-    assert result["phone"] is None
+
+def test_map_contact_phone_priority():
+    raw = {
+        "id": "p-1",
+        "full_name": "Phone Test",
+        "phone_work": "",
+        "phone_mobile": "123-456"
+    }
+    assert map_contact(raw)["phone"] == "123-456"
+
+    raw_work = {
+        "id": "p-2",
+        "full_name": "Phone Test 2",
+        "phone_work": "999",
+        "phone_mobile": "123-456"
+    }
+    assert map_contact(raw_work)["phone"] == "999"
+
+def test_map_contact_email_selection_logic():
+    # Test primary flag selection
+    raw = {
+        "id": "e-1",
+        "full_name": "Email Test",
+        "email": [
+            {"email_address": "first@test.com", "primary_address": False},
+            {"email_address": "second@test.com", "primary_address": True}
+        ]
+    }
+    assert map_contact(raw)["primary_email"] == "second@test.com"
+
+    # Test fallback to first in list if no primary
+    raw_no_prim = {
+        "id": "e-2",
+        "full_name": "Email Test 2",
+        "email": [
+            {"email_address": "only@test.com", "primary_address": False}
+        ]
+    }
+    assert map_contact(raw_no_prim)["primary_email"] == "only@test.com"

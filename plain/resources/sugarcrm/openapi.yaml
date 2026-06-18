@@ -1,0 +1,284 @@
+openapi: 3.1.0
+info:
+  title: SugarCRM REST API surface used by the sugarcrm integration
+  description: >
+    The exact SugarCRM (Sugar Sell / Serve / Enterprise) REST API surface the
+    sugarcrm integration calls.
+
+    Grounded in the SugarCRM Developer Guide REST API documentation (2026-06-17):
+    the /oauth2/token endpoint (password grant), the generic /<module> GET list
+    endpoint applied to the Contacts module, and the documented pagination
+    contract (max_num / offset / next_offset). No live credentials were
+    available, so this surface has NOT yet been cross-checked against a live
+    Sugar instance. When credentials arrive, re-probe the read-only GET paths
+    and let the live API win on any discrepancy with this file.
+
+    API version is pinned to v11 (path segment /rest/v11/). v11 is Sugar's
+    long-term stable major REST version; the minor revisions (v11_1 ... v11_x)
+    are wire-compatible supersets, so pinning the major keeps the field list and
+    pagination contract stable across point releases.
+
+    Authentication is OAuth 2.0 password grant against the Sugar instance: a
+    token is acquired from /oauth2/token and then sent on every data call in the
+    OAuth-Token request header (Sugar's own header name, not standard Bearer).
+    The flow issues a refresh token, but the integration simply acquires a fresh
+    access token on every fetch_contacts() call.
+
+    Dirty-data notes (inferred from docs; confirm on a live probe later): any
+    selected field other than id may be null or empty; an email address stored
+    on a contact is NOT guaranteed to be a syntactically valid email; a contact
+    may have no usable name (first_name / last_name / name all empty), in which
+    case the mapping skips it per the host's non-empty full_name requirement.
+servers:
+  - url: "{SUGARCRM_ENDPOINT}/rest/v11"
+    description: >
+      The Sugar instance REST root, e.g.
+      https://your-instance.sugarondemand.com/rest/v11. The host part is read
+      from the SUGARCRM_ENDPOINT environment variable; the /rest/v11 version
+      segment is fixed. Used for both the token request and every data call.
+    variables:
+      SUGARCRM_ENDPOINT:
+        default: https://your-instance.sugarondemand.com
+paths:
+  /oauth2/token:
+    post:
+      operationId: acquireToken
+      summary: OAuth 2.0 password-grant token request
+      description: >
+        Acquires an access token for the configured Sugar user. The integration
+        sends grant_type=password with the connected-client credentials and the
+        user's username/password. A fresh token is acquired on every
+        fetch_contacts() call; the refresh token is not used.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [grant_type, client_id, username, password]
+              properties:
+                grant_type:
+                  type: string
+                  const: password
+                client_id:
+                  type: string
+                  description: >
+                    The OAuth client id (env var SUGARCRM_CLIENT_ID). Sugar's
+                    default platform client id is "sugar".
+                client_secret:
+                  type: string
+                  description: >
+                    The OAuth client secret (env var SUGARCRM_CLIENT_SECRET).
+                    Empty string for the default "sugar" client.
+                username:
+                  type: string
+                  description: Sugar login username (env var SUGARCRM_USERNAME).
+                password:
+                  type: string
+                  description: Sugar login password (env var SUGARCRM_PASSWORD).
+                platform:
+                  type: string
+                  description: >
+                    Client platform identifier. A stable custom value (e.g.
+                    "base") avoids evicting the user's other active sessions.
+                  default: base
+      responses:
+        "200":
+          description: Token granted.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TokenResponse"
+        "400":
+          description: Invalid grant / client error.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+  /Contacts:
+    get:
+      operationId: listContacts
+      summary: List Contact records (one page)
+      description: >
+        Returns one page of Contact records via Sugar's generic /<module> GET
+        list endpoint. The integration pins the field list and page size;
+        subsequent pages are fetched by sending the previous response's
+        next_offset as the offset query parameter — see
+        components.schemas.ListEnvelope.
+      security:
+        - oauthToken: []
+      parameters:
+        - name: fields
+          in: query
+          required: true
+          description: >
+            Comma-delimited list of fields to return. id and date_modified are
+            always included by Sugar regardless of this list. The pinned list
+            matches the stock Contacts module fields verified in the docs.
+          schema:
+            type: string
+            const: >-
+              id,first_name,last_name,name,full_name,email,email1,phone_work,phone_mobile,title,account_name
+        - name: max_num
+          in: query
+          required: true
+          description: >
+            Page size. Sugar's default is 20 and its supported maximum is 1000;
+            the integration pins 200.
+          schema:
+            type: integer
+            const: 200
+        - name: offset
+          in: query
+          required: false
+          description: >
+            Number of records to skip before this page. Absent (or 0) on the
+            first request; on every subsequent request it is the next_offset
+            value returned by the previous page.
+          schema:
+            type: integer
+        - name: order_by
+          in: query
+          required: false
+          description: Stable sort so paging by offset is deterministic.
+          schema:
+            type: string
+            const: date_entered:asc
+      responses:
+        "200":
+          description: One page of Contact records.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ListEnvelope"
+        "401":
+          description: Missing, invalid, or expired access token.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+components:
+  securitySchemes:
+    oauthToken:
+      type: apiKey
+      in: header
+      name: OAuth-Token
+      description: >
+        The access_token from the token response, sent in the OAuth-Token
+        request header on every data call. This is Sugar's own header name, not
+        the standard Authorization: Bearer header.
+  schemas:
+    TokenResponse:
+      type: object
+      description: Password-grant token response.
+      required: [access_token, token_type]
+      properties:
+        access_token:
+          type: string
+          description: The token sent in the OAuth-Token header on later calls.
+        expires_in:
+          type: integer
+        token_type:
+          type: string
+          const: bearer
+        scope:
+          type: [string, "null"]
+        refresh_token:
+          type: string
+          description: Not used by the integration.
+        refresh_expires_in:
+          type: integer
+        download_token:
+          type: string
+    ListEnvelope:
+      type: object
+      description: >
+        Pagination model — the response carries the page in records[] and a
+        next_offset integer. When next_offset is -1 there are no more records
+        and paging stops; when it is a non-negative integer it is the offset to
+        send on the next request. The pinned page size is 200.
+      required: [records]
+      properties:
+        next_offset:
+          type: integer
+          description: >
+            The offset for the next page, or -1 when the current page was the
+            last one.
+        records:
+          type: array
+          items:
+            $ref: "#/components/schemas/ContactRecord"
+    ContactRecord:
+      type: object
+      description: >
+        One Contact entry of records[]. id is always present; every other
+        selected field may be null or empty. Sugar exposes email addresses both
+        as the structured `email` array and as the convenience flat field
+        `email1`. The email value is NOT guaranteed to be a syntactically valid
+        email address.
+      required: [id]
+      properties:
+        id:
+          type: string
+        first_name:
+          type: [string, "null"]
+        last_name:
+          type: [string, "null"]
+        name:
+          type: [string, "null"]
+          description: Compound display name; often mirrors full_name.
+        full_name:
+          type: [string, "null"]
+          description: Sugar's derived "First Last" display name.
+        email:
+          type: array
+          description: >
+            Structured email addresses. Each entry carries the address plus
+            flags; primary_address marks the contact's primary email.
+          items:
+            $ref: "#/components/schemas/EmailEntry"
+        email1:
+          type: [string, "null"]
+          description: Convenience flat field holding the primary email address.
+        phone_work:
+          type: [string, "null"]
+        phone_mobile:
+          type: [string, "null"]
+        title:
+          type: [string, "null"]
+        account_name:
+          type: [string, "null"]
+          description: Flat related-account name (not a nested object).
+        date_modified:
+          type: [string, "null"]
+          description: ISO 8601 last-modified timestamp, always returned by Sugar.
+        date_entered:
+          type: [string, "null"]
+      additionalProperties: true
+    EmailEntry:
+      type: object
+      description: One entry of the Contact `email` array.
+      properties:
+        email_address:
+          type: [string, "null"]
+        primary_address:
+          type: [boolean, string, "null"]
+          description: Truthy on the contact's primary email address.
+        opt_out:
+          type: [boolean, string, "null"]
+        invalid_email:
+          type: [boolean, string, "null"]
+      additionalProperties: true
+    ErrorEnvelope:
+      type: object
+      description: >
+        Sugar error bodies are a JSON object carrying an error code and a
+        human-readable message.
+      required: [error]
+      properties:
+        error:
+          type: string
+          description: Short error code, e.g. need_login, invalid_grant.
+        error_message:
+          type: [string, "null"]

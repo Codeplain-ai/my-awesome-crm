@@ -2,80 +2,45 @@
 import:
   - crm_common
   - integration_testing
-description: "SugarCRM Integration plug-in for the consolidated CRM backend. Adds src/integrations/sugarcrm/ so that GET /ingest/sugarcrm pulls Contacts from a SugarCRM instance and persists them via the host's dedup pipeline."
+description: "SugarCRM Integration plug-in for the consolidated CRM backend. Adds src/integrations/sugarcrm/ so that GET /ingest/sugarcrm pulls Contact records from a SugarCRM instance via the v11 REST API and persists them through the host's dedup pipeline."
 ---
 
 ***definitions***
 
 - :SugarCrmProvider: is the :Provider: identifier `sugarcrm` - the folder name `src/integrations/sugarcrm/` and the value used as `provider_id` on every :IncomingContact: this integration emits.
 
-- :SugarCrmCredentials: are the credentials required to authenticate against a SugarCRM instance, read from environment variables.
-  - `SUGARCRM_API_BASE` - base URL of the SugarCRM REST v11 API for the instance, e.g. `https://acme.sugarcrm.com/rest/v11` (required)
-  - `SUGARCRM_USERNAME` - SugarCRM username (required)
-  - `SUGARCRM_PASSWORD` - SugarCRM password (required)
-  - `SUGARCRM_CLIENT_ID` - OAuth2 client id (optional, defaults to `sugar`)
-  - `SUGARCRM_CLIENT_SECRET` - OAuth2 client secret (optional, defaults to the empty string)
-  - `SUGARCRM_PLATFORM` - OAuth2 platform identifier (optional, defaults to `base`)
+- :SugarCrmIntegration: is the concrete :Integration: for :SugarCrmProvider: that pulls SugarCRM `Contacts` records and yields :IncomingContact: records.
 
-- :SugarCrmIntegration: is the concrete :Integration: for :SugarCrmProvider: that pulls SugarCRM Contact records and yields :IncomingContact: records.
-  - Lives at `src/integrations/sugarcrm/__init__.py` and exposes a top-level callable `fetch_contacts()`.
-  - Calls the SugarCRM REST API v11 directly through the `requests` library - no third-party SugarCRM SDK is used.
-  - Reads :SugarCrmCredentials: on every call and exchanges them for a short-lived access token at the start of every call (no token caching in this MVP).
+- :SugarCrmCredentials: are the :IntegrationCredentials: for :SugarCrmProvider:, used to authenticate against a SugarCRM instance via the OAuth 2.0 password-grant flow, read from environment variables.
+  - `SUGARCRM_ENDPOINT` - the Sugar instance host, e.g. `https://your-instance.sugarondemand.com` (required)
+  - `SUGARCRM_CLIENT_ID` - the OAuth client id, Sugar's default platform client is `sugar` (required)
+  - `SUGARCRM_CLIENT_SECRET` - the OAuth client secret, empty string for the default `sugar` client (required)
+  - `SUGARCRM_USERNAME` - the Sugar login username (required)
+  - `SUGARCRM_PASSWORD` - the Sugar login password (required)
 
-***implementation reqs***
+- :SugarCrmRestAPI: is the exact SugarCRM v11 REST API surface this integration calls, defined by [resources/sugarcrm/openapi.yaml](resources/sugarcrm/openapi.yaml).
 
-- :SugarCrmIntegration: should be implemented using the `requests` library.
-  - `requests` is already pinned in `requirements.txt`; no new dependency is added.
-  - All SugarCRM API calls target `{SUGARCRM_API_BASE}` (no default - the instance domain is per-customer).
-
-- The integration package layout under `src/integrations/sugarcrm/` is:
-  - `__init__.py` - re-exports `fetch_contacts` from `client.py`.
-  - `client.py` - the SugarCRM HTTP client wrapper - reads :SugarCrmCredentials:, performs the OAuth2 token exchange, paginates through `/Contacts`, and yields :IncomingContact: dicts.
-  - `mapping.py` - the pure function that converts a raw SugarCRM Contact record into an :IncomingContact: dict.
-
-- :UnitTests: for the SugarCRM integration live under `tests/integrations/sugarcrm/` and never make real network calls.
-  - Both the token-exchange call and the contacts-list call go through one indirection point each in `client.py` so :UnitTests: can monkey-patch them independently.
-  - `mapping.py` must be tested with concrete sample SugarCRM Contact payloads (stored inline in the test files as Python dicts; no external fixtures).
+- :SugarCrmContactMapping: is the field-by-field contract for converting one raw SugarCRM `Contacts` record into an :IncomingContact: dict, fully described in [resources/sugarcrm/contact-mapping.md](resources/sugarcrm/contact-mapping.md).
 
 ***test reqs***
 
-- :ConformanceTests: of :SugarCrmIntegration: live in `conformance_tests/sugarcrm/` and target the live SugarCRM REST v11 API.
-  - The credential variables required from the environment are `SUGARCRM_API_BASE`, `SUGARCRM_USERNAME`, and `SUGARCRM_PASSWORD`.
+- :ConformanceTests: of :SugarCrmContactMapping: must generate dummy SugarCRM `Contacts` records based on the `ContactRecord` schema of :SugarCrmRestAPI: and map each one with :SugarCrmContactMapping:.
+  - Every generated record must conform to the `ContactRecord` schema of :SugarCrmRestAPI:.
+  - Each mapped result must be a valid :IncomingContact: that follows the :SugarCrmContactMapping: contract.
+  - This is a pure-function check: it invokes :SugarCrmContactMapping: directly on the dummy records and must not call the live API or `fetch_contacts()`.
 
 ***functional specs***
 
-- Implement :SugarCrmIntegration:'s contact-to-:IncomingContact: mapping as a pure function `sugarcrm_contact_to_incoming(contact: dict) -> dict` in `src/integrations/sugarcrm/mapping.py`.
-  - Input: a dict shaped like a SugarCRM Contact record (one entry of the `records[]` array returned by `GET /Contacts`).
-  - Output: an :IncomingContact: dict with keys `provider_id`, `external_id`, `full_name`, `primary_email`, `phone`, `job_title`, `company_name`, `custom_fields`.
-  - Field mapping rules:
-    - `provider_id` is always the literal string `sugarcrm` (matches :SugarCrmProvider:).
-    - `external_id` is the SugarCRM `id` field (required - raise `ValueError` if missing or empty).
-    - `full_name` is the SugarCRM `full_name` field when present and non-empty.
-      - Otherwise fall back to concatenating `first_name` and `last_name` separated by a single space, with surrounding whitespace stripped.
-      - If still empty, raise `ValueError` because :IncomingContact: requires a non-empty `full_name`.
-    - `primary_email` is the SugarCRM `email1` field, lowercased and trimmed, or `None` when missing or empty.
-    - `phone` is the SugarCRM `phone_work` field when non-empty; otherwise `phone_mobile`; otherwise `None`. No normalization.
-    - `job_title` is the SugarCRM `title` field, or `None` when missing or empty.
-    - `company_name` is the SugarCRM `account_name` field, or `None` when missing or empty.
-  - `custom_fields` captures every top-level key on the input dict that is **not** consumed by the unified schema above (i.e. not in `{id, full_name, first_name, last_name, email1, phone_work, phone_mobile, title, account_name}`). The remaining keys are copied verbatim into a new dict.
+- Implement a function that implements :SugarCrmContactMapping: as a pure function within the integration package.
 
-- Implement :SugarCrmIntegration:'s client wrapper in `src/integrations/sugarcrm/client.py`.
-  - It exposes one top-level callable `fetch_contacts()` that returns a list of :IncomingContact: dicts.
-  - On each call:
-    - Read :SugarCrmCredentials: from environment variables. If `SUGARCRM_API_BASE`, `SUGARCRM_USERNAME`, or `SUGARCRM_PASSWORD` is missing or empty, raise `RuntimeError` with a message naming the missing variable. `SUGARCRM_CLIENT_ID` defaults to `sugar`, `SUGARCRM_CLIENT_SECRET` defaults to the empty string, `SUGARCRM_PLATFORM` defaults to `base`.
-    - Exchange the credentials for an access token by POSTing JSON `{"grant_type": "password", "client_id", "client_secret", "username", "password", "platform"}` to `{SUGARCRM_API_BASE}/oauth2/token`. Extract `access_token` from the response body.
-    - Use the access token in the `OAuth-Token: <token>` header (SugarCRM's own header name) plus `Accept: application/json` for every subsequent API call.
-    - Page through all contacts using SugarCRM's `offset` / `max_num` query params:
-      - Initial request: `GET {SUGARCRM_API_BASE}/Contacts?offset=0&max_num=200` with the headers above.
-      - Each response is a JSON object with `records` (list of contacts) and `next_offset` (int; SugarCRM returns `-1` when there are no more pages).
-      - After processing each page, continue with `offset = next_offset` while `next_offset >= 0`; stop when `next_offset < 0` or `records` is empty.
-    - For each record in `records`, pass it through `sugarcrm_contact_to_incoming` from `mapping.py` and append to the returned list.
-    - If any HTTP response has a non-2xx status code, raise `RuntimeError` with the status code, the URL, and the response body included in the message.
-  - The HTTP calls must be reachable through two distinct indirection points so :UnitTests: can monkey-patch them independently:
-    - `_token_exchange(api_base: str, client_id: str, client_secret: str, username: str, password: str, platform: str) -> str` - performs the token POST and returns the access token string.
-    - `_get_contacts_page(api_base: str, access_token: str, offset: int) -> dict` - performs `GET /Contacts?offset=<offset>&max_num=200` with the bearer header and returns the parsed JSON body.
+- Implement :SugarCrmIntegration:'s `fetch_contacts()` entry point.
+  - Read :SugarCrmCredentials: from environment variables. If any required variable is missing or empty, raise `RuntimeError` with a message naming the missing environment variable key (e.g. `SUGARCRM_ENDPOINT`).
+  - Acquire an access token via the OAuth password-grant token endpoint of :SugarCrmRestAPI:, then send it in the `OAuth-Token` header on every data call as defined by :SugarCrmRestAPI:.
+  - Request the first page of contacts from the contacts list endpoint of :SugarCrmRestAPI: with its pinned field list, pinned page size, and headers.
+  - Read every subsequent page per the pagination envelope of :SugarCrmRestAPI: until all pages are read.
+  - For each record across all pages, map it with :SugarCrmContactMapping:.
+    - If mapping one record raises `ValueError`, skip that record and log a warning naming its `id`, then continue.
+  - Return the list of successfully mapped :IncomingContact: dicts.
 
 - Wire :SugarCrmIntegration: into the host's runtime discovery surface.
-  - `src/integrations/sugarcrm/__init__.py` re-exports `fetch_contacts` from `client.py` (the file consists of one line: `from src.integrations.sugarcrm.client import fetch_contacts`).
-  - No new entries are added to `requirements.txt`.
-  - The host's existing `GET /ingest/{integration}` endpoint will discover the integration by name `sugarcrm` and invoke `fetch_contacts()` per the host's contract - no host-side code changes are required.
+  - `src/integrations/sugarcrm/__init__.py` exports only the top-level callable `fetch_contacts` and re-exports no other names.

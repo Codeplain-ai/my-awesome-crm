@@ -1,0 +1,8 @@
+{
+    "source_hash": "ff270905fe60bcefb61949a95dfd5100b3b1439e6c806230d859d342e1b8c3c0",
+    "functionalities": [
+        "- Implement a function that implements :CloseContactMapping: as a pure function within the integration package.",
+        "- Implement :CloseIntegration:'s `fetch_contacts()` entry point.\n  - Read :CloseCredentials: from environment variables. If any required variable is missing or empty, raise `RuntimeError` with a message naming the missing environment variable key (e.g. `CLOSE_API_KEY`).\n  - Send the HTTP Basic authorization header per :CloseRestAPI: on every request, with the API key as the username and a blank password.\n  - Request the first page of contacts from the contact list endpoint of :CloseRestAPI: with its pinned `_limit` page size.\n  - Read every subsequent page per the pagination envelope of :CloseRestAPI: until `has_more` is false.\n  - For each record across all pages, map it with :CloseContactMapping:.\n    - If mapping one record raises `ValueError`, skip that record and log a warning naming its `id`, then continue.\n  - Return the list of successfully mapped :IncomingContact: dicts.",
+        "- Wire :CloseIntegration: into the host's runtime discovery surface.\n  - `src/integrations/close/__init__.py` exports only the top-level callable `fetch_contacts` and re-exports no other names."
+    ]
+}

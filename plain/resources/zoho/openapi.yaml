@@ -1,0 +1,280 @@
+openapi: 3.1.0
+info:
+  title: Zoho CRM REST API surface used by the zoho integration
+  description: >
+    The exact Zoho CRM v3 REST API surface the zoho integration calls.
+    Grounded in the Zoho CRM v3 REST API documentation AND the Zoho OAuth v2
+    documentation (2026-06-17): the Refresh Access Tokens guide and the Get
+    Records guide for the Contacts module. NO live credentials were available,
+    so this surface has NOT been cross-checked against a live org — it is
+    documentation-grounded only. When credentials arrive, re-probe the
+    read-only GETs and let the live API win on any discrepancy.
+
+    API version is pinned to v3 (the version segment lives in the URL path
+    /crm/v3/Contacts); v3 is a stable Zoho CRM REST API version. The pin keeps
+    the contact field shape and the pagination envelope stable across renders.
+    Authentication is OAuth 2.0: a long-lived refresh token is exchanged at the
+    region-specific Zoho Accounts host for a short-lived access token (valid ~1
+    hour), which is then sent on every data call as
+    `Authorization: Zoho-oauthtoken <access_token>`.
+
+    Region note: Zoho is multi-datacenter. Both the Accounts host (e.g.
+    https://accounts.zoho.com, .eu, .in, .com.au, .jp) and the data API host
+    (e.g. https://www.zohoapis.com) are region-specific and are supplied at
+    runtime as environment-provided values — ZOHO_ACCOUNTS_HOST for the token
+    call and ZOHO_API_HOST for data calls. The token response also echoes an
+    api_domain; this integration uses the configured ZOHO_API_HOST.
+
+    Dirty-data notes inferable from the docs (confirm on live re-probe): any
+    selected field can be null except id; the Email value is NOT guaranteed to
+    be a syntactically valid email address; Account_Name is a lookup field that
+    is returned as a nested object carrying name and id, OR as a plain string,
+    OR as null when the contact has no linked account; Full_Name is a read-only
+    system-computed concatenation of First_Name and Last_Name and may be null.
+  version: v3
+servers:
+  - url: "{ZOHO_ACCOUNTS_HOST}"
+    description: >
+      The region-specific Zoho Accounts host, read from the ZOHO_ACCOUNTS_HOST
+      environment variable. Used ONLY for the token request.
+    variables:
+      ZOHO_ACCOUNTS_HOST:
+        default: https://accounts.zoho.com
+  - url: "{ZOHO_API_HOST}"
+    description: >
+      The region-specific data API host for every Contacts call, read from the
+      ZOHO_API_HOST environment variable. The token response also returns this
+      value in its api_domain field, but the integration uses ZOHO_API_HOST.
+    variables:
+      ZOHO_API_HOST:
+        default: https://www.zohoapis.com
+paths:
+  /oauth/v2/token:
+    post:
+      operationId: refreshAccessToken
+      summary: OAuth 2.0 refresh-token grant (mint a fresh access token)
+      description: >
+        Server is the ZOHO_ACCOUNTS_HOST host. The request body is
+        form-url-encoded. The flow returns a new access_token valid for about
+        an hour plus the api_domain to use for data calls; a fresh access token
+        is acquired on every fetch_contacts() call.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              type: object
+              required: [grant_type, client_id, client_secret, refresh_token]
+              properties:
+                grant_type:
+                  type: string
+                  const: refresh_token
+                client_id:
+                  type: string
+                  description: The Zoho API client id (env var ZOHO_CLIENT_ID).
+                client_secret:
+                  type: string
+                  description: The Zoho API client secret (env var ZOHO_CLIENT_SECRET).
+                refresh_token:
+                  type: string
+                  description: The long-lived refresh token (env var ZOHO_REFRESH_TOKEN).
+      responses:
+        "200":
+          description: A fresh access token was granted.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TokenResponse"
+        "400":
+          description: Invalid grant / client error.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+  /crm/v3/Contacts:
+    get:
+      operationId: listContacts
+      summary: Get Contact records (one page)
+      description: >
+        Server is the ZOHO_API_HOST host. Returns one page of Contact records.
+        The integration pins the fields list and per_page; subsequent pages are
+        fetched by incrementing the page query parameter while info.more_records
+        is true — see components.schemas.RecordsEnvelope. Note: fetching beyond
+        2000 records requires switching to the next_page_token mechanism (page
+        and page_token cannot be combined); the pinned per_page of 200 covers
+        the first 2000 records via page increments.
+      security:
+        - oauthToken: []
+      parameters:
+        - name: fields
+          in: query
+          required: true
+          description: >
+            The comma-separated API names of the fields to retrieve (mandatory
+            on this endpoint; max 50). The integration pins exactly this list.
+          schema:
+            type: string
+            const: id,Full_Name,First_Name,Last_Name,Email,Phone,Mobile,Title,Account_Name
+        - name: per_page
+          in: query
+          required: true
+          description: Page size. Zoho's default and maximum for this endpoint is 200.
+          schema:
+            type: integer
+            const: 200
+        - name: page
+          in: query
+          required: true
+          description: >
+            1-based page number, incremented on each subsequent request while
+            info.more_records is true. Default is 1.
+          schema:
+            type: integer
+            default: 1
+      responses:
+        "200":
+          description: One page of Contact records.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RecordsEnvelope"
+        "204":
+          description: >
+            No content — Zoho returns 204 with an empty body when the module
+            has no records (or no further page).
+        "401":
+          description: Invalid or expired OAuth token (INVALID_TOKEN).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+components:
+  securitySchemes:
+    oauthToken:
+      type: apiKey
+      in: header
+      name: Authorization
+      description: >
+        The Authorization header carrying `Zoho-oauthtoken <access_token>`,
+        where <access_token> is the value returned by the refresh-token grant.
+        Sent on every data API request.
+  schemas:
+    TokenResponse:
+      type: object
+      description: Keys grounded in the Refresh Access Tokens guide.
+      required: [access_token, expires_in, token_type]
+      properties:
+        access_token:
+          type: string
+          description: The short-lived bearer token used on every Contacts call.
+        expires_in:
+          type: integer
+          description: Access-token lifetime in seconds (typically 3600).
+        api_domain:
+          type: string
+          description: >
+            The data API host Zoho recommends for this token. The integration
+            uses the configured ZOHO_API_HOST instead of this field.
+        token_type:
+          type: string
+          const: Bearer
+        scope:
+          type: string
+    RecordsEnvelope:
+      type: object
+      description: >
+        Pagination model — the records live in data[] and the info block
+        carries paging state. When info.more_records is true, more pages exist;
+        request the next page by incrementing the page query parameter by 1.
+        Stop when info.more_records is false (or the response is 204 with no
+        body, or data is absent or empty). per_page is fixed at 200.
+      required: [data]
+      properties:
+        data:
+          type: array
+          items:
+            $ref: "#/components/schemas/ContactRecord"
+        info:
+          $ref: "#/components/schemas/PageInfo"
+    PageInfo:
+      type: object
+      description: Paging metadata returned alongside every page of records.
+      properties:
+        more_records:
+          type: boolean
+          description: True when at least one further page exists.
+        page:
+          type: integer
+          description: The 1-based page number of this response.
+        per_page:
+          type: integer
+          description: Records per page (200).
+        count:
+          type: integer
+          description: Number of records on the current page.
+    ContactRecord:
+      type: object
+      description: >
+        One Contact entry of data[]. id is always present. Any selected field
+        can be null. Full_Name is a read-only system-computed concatenation of
+        First_Name and Last_Name and may be null. The Email value is NOT
+        guaranteed to be a syntactically valid email address. Account_Name is a
+        lookup: a nested object with name and id, OR a plain string, OR null
+        when the contact has no linked account. Records may also carry
+        "$"-prefixed system fields (e.g. $approved, $editable,
+        $currency_symbol, $field_states) and an Owner lookup object — these are
+        API metadata, never business data.
+      required: [id]
+      properties:
+        id:
+          type: string
+          description: The Zoho record id (always returned).
+        Full_Name:
+          type: [string, "null"]
+          description: System-computed concatenation of First_Name and Last_Name.
+        First_Name:
+          type: [string, "null"]
+        Last_Name:
+          type: [string, "null"]
+        Email:
+          type: [string, "null"]
+        Phone:
+          type: [string, "null"]
+        Mobile:
+          type: [string, "null"]
+        Title:
+          type: [string, "null"]
+        Account_Name:
+          description: >
+            Lookup to the linked Account. Either a nested object with a name
+            display value and id, a plain string, or null.
+          oneOf:
+            - type: "null"
+            - type: string
+            - type: object
+              properties:
+                name:
+                  type: [string, "null"]
+                  description: The account display value.
+                id:
+                  type: [string, "null"]
+                  description: The account record id.
+      additionalProperties: true
+    ErrorEnvelope:
+      type: object
+      description: >
+        Zoho error bodies are a JSON object carrying code, message, status and
+        details (e.g. {"code":"INVALID_TOKEN","message":"invalid oauth token",
+        "status":"error","details":{}}).
+      required: [code, message, status]
+      properties:
+        code:
+          type: string
+        message:
+          type: string
+        status:
+          type: string
+        details:
+          type: object
+          additionalProperties: true

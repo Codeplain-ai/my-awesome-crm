@@ -1,59 +1,125 @@
-from typing import Any
+import logging
+from typing import Any, Optional
+from email_validator import validate_email, EmailNotValidError
 
-def sugarcrm_contact_to_incoming(contact: dict[str, Any]) -> dict[str, Any]:
+logger = logging.getLogger(__name__)
+
+def validate_and_normalize_email(email_str: Optional[str]) -> Optional[str]:
     """
-    Converts a SugarCRM Contact record into an IncomingContact dict.
+    Validates an email string using the same rules as the host.
+    Returns lowercased and trimmed email if valid, else None.
+    """
+    if not email_str:
+        return None
     
-    Field mapping rules:
-    - provider_id: 'sugarcrm'
-    - external_id: 'id' (required)
-    - full_name: 'full_name' or 'first_name' + 'last_name' (required)
-    - primary_email: 'email1' (lowercased)
-    - phone: 'phone_work' or 'phone_mobile'
-    - job_title: 'title'
-    - company_name: 'account_name'
-    - custom_fields: All other unconsumed top-level keys
+    trimmed = email_str.strip()
+    if not trimmed:
+        return None
+
+    try:
+        # Check validity without deliverability/DNS checks per contract
+        email_info = validate_email(trimmed, check_deliverability=False)
+        return email_info.normalized.lower()
+    except EmailNotValidError:
+        return None
+
+def map_contact(raw: dict[str, Any]) -> dict[str, Any]:
     """
-    external_id = contact.get("id")
+    Implements SugarCRM Contact -> IncomingContact mapping contract.
+    
+    Raises ValueError if:
+    - id is missing or empty.
+    - full_name cannot be derived.
+    """
+    # 1. Provider ID and External ID
+    external_id = raw.get("id")
     if not external_id:
-        raise ValueError("SugarCRM record is missing 'id'")
-
-    # Full Name logic
-    full_name = contact.get("full_name", "").strip()
-    if not full_name:
-        first_name = contact.get("first_name", "").strip()
-        last_name = contact.get("last_name", "").strip()
-        full_name = f"{first_name} {last_name}".strip()
+        raise ValueError("SugarCRM record missing 'id'")
     
+    # 2. Primary Email Selection
+    selected_email: Optional[str] = None
+    email_list = raw.get("email")
+    
+    if isinstance(email_list, list) and email_list:
+        # Try to find primary
+        for entry in email_list:
+            if entry.get("primary_address"):
+                selected_email = entry.get("email_address")
+                break
+        
+        # Fallback to first non-empty
+        if not selected_email:
+            for entry in email_list:
+                if entry.get("email_address"):
+                    selected_email = entry.get("email_address")
+                    break
+
+    # Fallback to email1
+    if not selected_email:
+        selected_email = raw.get("email1")
+
+    # 3. Email Validation
+    primary_email = validate_and_normalize_email(selected_email)
+    if selected_email and not primary_email:
+        logger.warning(
+            f"SugarCRM record '{external_id}' has invalid email address: {selected_email}"
+        )
+
+    # 4. Full Name Derivation
+    full_name: Optional[str] = None
+    
+    # Rule 1: full_name or name
+    fn_val = raw.get("full_name") or raw.get("name")
+    if fn_val and fn_val.strip():
+        full_name = fn_val.strip()
+    
+    # Rule 2: first + last
     if not full_name:
-        raise ValueError(f"SugarCRM record {external_id} is missing a name")
+        first = (raw.get("first_name") or "").strip()
+        last = (raw.get("last_name") or "").strip()
+        joined = f"{first} {last}".strip()
+        if joined:
+            full_name = joined
+            
+    # Rule 3: primary email fallback
+    if not full_name and selected_email and selected_email.strip():
+        full_name = selected_email.strip()
+        
+    if not full_name:
+        raise ValueError(f"SugarCRM record '{external_id}' has no derivable full_name")
 
-    # Primary Email
-    primary_email = contact.get("email1", "").strip().lower() or None
+    # 5. Other fields
+    phone_work = raw.get("phone_work")
+    phone_mobile = raw.get("phone_mobile")
+    phone = (phone_work if phone_work and phone_work.strip() else phone_mobile)
+    if phone:
+        phone = phone.strip() or None
+    else:
+        phone = None
 
-    # Phone logic: phone_work fallback to phone_mobile
-    phone = contact.get("phone_work") or contact.get("phone_mobile") or None
+    job_title = raw.get("title")
+    if job_title:
+        job_title = job_title.strip() or None
+    
+    company_name = raw.get("account_name")
+    if company_name:
+        company_name = company_name.strip() or None
 
-    # Mapping basic fields
-    incoming = {
+    # 6. Custom Fields
+    # Provenance fields copied verbatim
+    custom_fields = {}
+    for k in ["date_entered", "date_modified"]:
+        if raw.get(k) is not None:
+            custom_fields[k] = raw[k]
+
+    # Return normalized IncomingContact dict
+    return {
         "provider_id": "sugarcrm",
         "external_id": str(external_id),
         "full_name": full_name,
         "primary_email": primary_email,
         "phone": phone,
-        "job_title": contact.get("title") or None,
-        "company_name": contact.get("account_name") or None,
-        "custom_fields": {}
+        "job_title": job_title,
+        "company_name": company_name,
+        "custom_fields": custom_fields
     }
-
-    # Custom fields: everything not consumed
-    consumed_keys = {
-        "id", "full_name", "first_name", "last_name", 
-        "email1", "phone_work", "phone_mobile", "title", "account_name"
-    }
-    
-    for key, value in contact.items():
-        if key not in consumed_keys:
-            incoming["custom_fields"][key] = value
-
-    return incoming

@@ -1,1 +1,1 @@
-# Marks directory as a test package
+# Marks the directory as a Python package for pytest collection.

@@ -44,12 +44,12 @@ instead of drafting a separate one.
 ## The 120-char line-length rule is style-only — the renderer does not enforce it
 
 `.claude/rules/line-length.md` states a 120-char hard limit, but the `codeplain` renderer does **not**
-enforce it. The accepted, green-rendering exemplar `plain/dynamics.plain` routinely exceeds it (~39
-lines over 120, the longest ~282 chars) and renders fine.
+enforce it. Both green-rendering modules routinely exceed it (`dynamics.plain`: ~41 lines over 120,
+the longest ~297 chars; `salesforce.plain`: ~17 lines over, the longest ~258) and render fine.
 
-**Rule:** when authoring a new integration by mirroring `dynamics.plain`, **match its style** — keep
-every line a proper `- ` bullet (nest bullets for grouping), but do **not** spend effort splitting
-long-but-valid bullets just to hit 120. Reflowing the exemplar's long bullets to ≤120 only diverges
+**Rule:** when authoring a new integration (mirror `salesforce.plain` for structure — see *Authoring
+the next integration* below), **keep every line a proper `- ` bullet** (nest bullets for grouping),
+but do **not** spend effort splitting long-but-valid bullets just to hit 120. Reflowing the exemplar's long bullets to ≤120 only diverges
 from the proven pattern without benefit. The one thing the renderer genuinely rejects is a **bare
 continuation line** — any line inside a section that does not start with `- ` (see
 `line-length.md` § *Never use bare continuation lines*). Avoid those at all costs; the 120-char count
@@ -76,6 +76,128 @@ functionality 1 (`impl-reqs.md` § *Encapsulation warning*).
 
 When a mid-render stop happens anyway, do not just patch and move on — **fold the fix back into the
 specs AND into this file** so the next integration never hits it.
+
+## Authoring the next integration — `salesforce.plain` is the structural exemplar
+
+`salesforce.plain` was refactored end-to-end and re-rendered green; it **supersedes `dynamics.plain`
+as the structural exemplar**. Dynamics remains the evidence for the line-length lesson above but is
+only partly migrated: its layout bullet still names `client.py`/`mapping.py`, its auth / query /
+pagination details are still inline rather than behind an OpenAPI concept, its test reqs still
+declare the conformance folder, and its email guard is still a local implementation req — do not
+copy those parts. The target module is ~60 lines; everything bulkier belongs in `resources/` or
+`template/crm_common.plain`:
+
+- **5 definitions** — provider id, credentials (env-var names), `:<Provider>RestAPI:` (OpenAPI link),
+  `:<Provider>ContactMapping:` (mapping-doc link), and the integration concept itself.
+- **~3 implementation reqs** — host-package reuse/no-SDK/no-re-pin, a one-line auth pointer, and a
+  one-line query pointer into `:<Provider>RestAPI:`.
+- **1 test req** — conformance targets the provider's live API + the exact credential env-var names
+  (identical to the names the runtime reads). Nothing else: folder location, framework, runner
+  script, and pass criteria all come from the imported `integration_testing` template.
+- **3 functional specs** — mapping, the `fetch_contacts()` composition, one-bullet wiring.
+
+### The whole API surface lives in `resources/<provider>/openapi.yaml`, reached through one concept
+
+Author the OpenAPI file **first**, from the live cross-check, and put **everything** in it: the auth
+/ token endpoint with its request body, the query endpoint with the pinned query string as a schema
+`const`, required headers, the API-version pin **with the reason**, the pagination envelope and its
+mechanics, the record schema (with dirty-data annotations like "Email is NOT guaranteed valid"), the
+error envelope, every docs-vs-live discrepancy ("live API wins"), and the saved probe fixtures wired
+in via `examples.externalValue` — so the schema, fixtures, and `rest-crosscheck.md` form one
+auditable bundle. Define `:<Provider>RestAPI:` in `***definitions***` carrying the **only** link to
+the file; spec text then says "the token endpoint / query endpoint / pagination envelope of
+`:<Provider>RestAPI:`" and **never** restates URLs, headers, fields, status codes, or continuation
+markers (`nextRecordsUrl`, `@odata.nextLink`) inline. The pagination spec line is one sentence —
+the exemplar's reads "Read every subsequent page per the pagination envelope of
+:SalesforceRestAPI: until all pages are read." This per-provider folder layout deliberately
+supersedes the flat `resources/<provider>.openapi.yaml` path in `integrations.md`'s artifact table
+for this project; follow the folder layout.
+
+### The mapping contract lives in `resources/<provider>/contact-mapping.md`, reached through one concept
+
+The full field-by-field contract — mapping table, `full_name` derivation cascade, `primary_email`
+validation (host's `email-validator`, deliverability off, emit `None` + warning, **not** a
+record-skip), `custom_fields` rules, and the **exact** raise conditions (a `ValueError` only for a
+missing provider id or an underivable `full_name`) — lives in the mapping doc, attached to a
+`:<Provider>ContactMapping:` concept. Functional spec 1 is then "Implement
+`:<Provider>ContactMapping:` as a pure function within the integration package" plus three deferral
+bullets: the input shape (one `ContactRecord` of `:<Provider>RestAPI:`'s query response), the
+output ("exactly those `:<Provider>ContactMapping:` pins"), and the `provider_id` literal.
+**No function name, no file path** — and the host-contract email guard (see
+*The host's own contract validation* below) is satisfied by copying the `primary_email` section of
+`resources/salesforce/contact-mapping.md` into every new mapping doc until the guard is finally
+hoisted into `crm_common`.
+
+### `crm_common` owns the cross-cutting reqs — author only the per-provider residue
+
+`template/crm_common.plain` now carries (a new integration must **not** restate any of it):
+
+- the **skip-and-log batch policy** (generic, "provider-side id" abstracted),
+- the **layout/identifier contract**: the only file contract is `src/integrations/<id>/__init__.py`
+  exporting `fetch_contacts()` returning a **list** of dicts (each a valid `:IncomingContact:`,
+  transformed by the host into `:Contact:`); internal organization is explicitly optional,
+- the **integration `:UnitTests:` policy** (no network, single indirection seams, inline dict
+  payloads, and the three mandatory coverage cases: skip-and-log, multi-page pagination,
+  invalid-email-to-`None`),
+- the **host ground-truth links**, linked once and in place: `../src/services/ingest.py` (on the
+  `:Integration:` concept — discovery + invocation logic) and `../requirements.txt` (under the pip
+  req — the no-re-pin source of truth). Never re-link or paraphrase these per-module.
+
+The per-provider residue (never restate a shared rule's body; either inherit silently like
+`salesforce.plain` or use `dynamics.plain`'s explicit pointer phrasing **"the shared X (from the
+imported common reqs) applies with <provider-specific parameters>"** when a parameter must be
+bound):
+
+1. the `:Provider:` identifier binding;
+2. the provider-side id field named in skip warnings, plus the probed org's expected skip counts
+   recorded as "skipped by design" in its `rest-crosscheck.md` (salesforce's probed org expects 0
+   skips; dynamics' expects 142 of 341 — see *Live data is dirty* below);
+3. the host packages reused **by name** (e.g. `requests`) and any deliberate no-SDK constraint;
+4. the live-API test req with the exact env-var names;
+5. optionally, the three `:UnitTests:` parameterizations (unmappable-record shape, pagination
+   continuation marker, malformed-email example) — the `dynamics.plain` pattern.
+
+A functional spec may still narrate per-record behavior that *is* that functionality's WHAT (the
+`fetch_contacts()` composition names the skip-on-`ValueError` step inline) — the prohibition is on
+restating the shared *policy* as a second implementation req.
+
+### Never mandate internals — and know what the relaxation costs
+
+Do not pin internal file names (`client.py`, `mapping.py`), private function names
+(`_acquire_token`, `_get_json`), or per-file re-export wording. The contract is behavior plus the
+single `__init__.py` export. Evidence this is real: after the mandates were removed, the re-render
+**deleted `client.py`** and folded the client logic into `__init__.py` — correct per the contract.
+Two costs to watch:
+
+- the previously mandated injectable seams went away with the file mandates. If a render produces
+  hard-to-mock code, tighten `crm_common`'s *behavioral* seam req ("single indirection seams"),
+  not the per-module spec;
+- **pins hide in linked resources.** The mapping doc's preamble still pinned the function name and
+  `mapping.py` after the spec text was cleaned, and the renderer obeyed the doc (that's why
+  `mapping.py` survived the re-render). Linked resource docs must obey the no-internals rule too —
+  sweep them when stripping mandates from spec text.
+
+### Error-message specs must name the identifier space (render incident, 2026-06-12)
+
+The renderer flagged a **Specification ambiguity** on "raise a `RuntimeError` naming the missing
+variable": "variable" could mean an internal dict key (`endpoint`) or the env-var key
+(`SALESFORCE_ENDPOINT`), and the conformance test asserts the **literal string**. Rule: when a spec
+mandates that an error message "names" something, pin the identifier space and give an example —
+"naming the missing environment variable key (e.g. `SALESFORCE_ENDPOINT`)". The fix is folded into
+`salesforce.plain`; phrase it that way from the start in every new integration.
+
+### Pre-launch and post-render checks this session added
+
+- **Verify `.env` keys literally match the spec'd env-var names before rendering.** A
+  `SALESFORCE_SLIENT_SECRET` typo (for `SALESFORCE_CLIENT_SECRET`) would have failed every live
+  conformance attempt; the conformance runner is deliberately integration-agnostic and will not
+  catch it — only the live `RuntimeError` would, mid-render.
+- **Keep `verbose: true` in `plain/config.yaml`.** codeplain's `--verbose` defaults to *disabled*;
+  without the config pin the log carries no test-script output, which silently blinds both the
+  post-render mining below and `run-codeplain`'s spec-deviation classification.
+- **After every render, mine `conformance_tests/<module>/.memory/conformance_test_memory/*.json`**
+  and the log for `Specification ambiguity detected` blocks. Every RESOLVED entry and ambiguity
+  suggestion is a render-time incident whose lesson gets folded into the specs and this file.
 
 ## The timing trap: conformance is live and end-to-end from functionality 1
 
@@ -143,6 +265,10 @@ every one is exposed to the same crash, so the guard belongs wherever it applies
   every integration inherits the guard from functionality 1 instead of each one re-discovering the
   crash. A per-integration fix (as done for Salesforce on 2026-06-08, confirmed working) unblocks one
   provider but leaves the rest latent — prefer the shared req when fixing this class of bug broadly.
+- **Current state (2026-06-12):** the guard is still per-provider. In the optimized shape it lives
+  inside the provider's mapping contract doc (`resources/salesforce/contact-mapping.md`
+  § *primary_email validation*); `dynamics.plain` still carries it as a local implementation req.
+  Every new integration must copy the mapping-doc section until the `crm_common` hoist happens.
 
 ## Pin the third-party SDK API surface — not just the provider's REST API
 
@@ -173,8 +299,11 @@ the spec.
   `requests`, `httpx`, `pydantic`) — these are already pinned by the host, so the integration must
   **not** re-pin or re-add them (`integration-embedded.md` § *No host-overlapping reqs*).
 - Only a dependency the host does **not** already provide is added to `requirements.txt` with an
-  explicit version pin, and that addition is called out in the spec (as `simple-salesforce` is in
-  `salesforce.plain`).
+  explicit version pin, and that addition is called out in the spec (as `pipedrive.plain` does for
+  its explicit `requests` pin). `salesforce.plain` deliberately adds nothing — it forbids any
+  Salesforce SDK and uses the host's `requests`. **Known stale pin:** `requirements.txt` still
+  carries `simple-salesforce` from the pre-refactor salesforce spec; it is dead residue, not an
+  available-package signal — do not build on it, and remove it when convenient.
 - For any newly added SDK, still pin its exact API surface per *Pin the third-party SDK API surface*
   above — "available in the system" answers *whether* it is present, not *how* its API is shaped.
 

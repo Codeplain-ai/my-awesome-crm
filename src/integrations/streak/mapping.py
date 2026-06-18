@@ -1,56 +1,95 @@
-from typing import Any, Dict, List, Optional
+import logging
+from typing import Any
+from email_validator import validate_email, EmailNotValidError
+from src.models.schemas import IncomingContact
 
-def streak_contact_to_incoming(contact: Dict[str, Any]) -> Dict[str, Any]:
-    """
-    Maps a Streak Contact record to the unified IncomingContact schema.
-    """
-    # 1. Provider and External ID
-    external_id = contact.get("key")
-    if not external_id:
-        raise ValueError("Streak contact is missing the required 'key' field.")
+logger = logging.getLogger(__name__)
 
-    # 2. Full Name with fallbacks
-    full_name = contact.get("fullName", "").strip()
+def map_streak_contact(raw: dict[str, Any]) -> IncomingContact:
+    """
+    Implements the StreakContactMapping contract.
+    Converts a raw Streak ContactRecord dict into an IncomingContact.
+    
+    Raises ValueError for records that must be skipped (missing key or name).
+    """
+    # 1. external_id (key)
+    external_id = raw.get("key")
+    if not external_id or not str(external_id).strip():
+        raise ValueError("Streak record missing required 'key'")
+
+    # 2. full_name derivation
+    full_name = None
+    
+    # Rule 1: fullName
+    fn_field = raw.get("fullName")
+    if fn_field and str(fn_field).strip():
+        full_name = str(fn_field).strip()
+    
+    # Rule 2: givenName + familyName
     if not full_name:
-        given = contact.get("givenName", "").strip()
-        family = contact.get("familyName", "").strip()
-        full_name = f"{given} {family}".strip()
+        gn = str(raw.get("givenName") or "").strip()
+        sn = str(raw.get("familyName") or "").strip()
+        joined = f"{gn} {sn}".strip()
+        if joined:
+            full_name = joined
+
+    # Rule 3: first email
+    emails = raw.get("emailAddresses") or []
+    if not full_name and emails:
+        for email in emails:
+            if email and str(email).strip():
+                full_name = str(email).strip()
+                break
     
     if not full_name:
-        raise ValueError(f"Streak contact {external_id} is missing a valid name.")
+        raise ValueError(f"Streak record {external_id} has no derivable full_name")
 
-    # 3. Helper for list fields (email/phone)
-    def _pick_first(items: Optional[List[str]]) -> Optional[str]:
-        if not items:
-            return None
-        for item in items:
-            if item and item.strip():
-                return item.strip()
-        return None
+    # 3. primary_email validation
+    primary_email = None
+    if emails:
+        first_email = None
+        for e in emails:
+            if e and str(e).strip():
+                first_email = str(e).strip()
+                break
+        
+        if first_email:
+            try:
+                # Validate using host's preferred logic (no DNS/deliverability checks)
+                valid = validate_email(first_email, check_deliverability=False)
+                primary_email = valid.normalized.lower()
+            except EmailNotValidError:
+                logger.warning(
+                    f"Streak record {external_id} has invalid primary email: {first_email}"
+                )
+                primary_email = None
 
-    # 4. Field Mapping
-    primary_email = _pick_first(contact.get("emailAddresses"))
-    if primary_email:
-        primary_email = primary_email.lower()
-    
-    phone = _pick_first(contact.get("phoneNumbers"))
-    job_title = contact.get("title") or None
-    company_name = contact.get("companyName") or None
+    # 4. phone
+    phone = None
+    phone_numbers = raw.get("phoneNumbers") or []
+    for p in phone_numbers:
+        if p and str(p).strip():
+            phone = str(p).strip()
+            break
 
-    # 5. Custom Fields (everything not in the unified schema)
-    consumed_keys = {
-        "key", "fullName", "givenName", "familyName", 
-        "emailAddresses", "phoneNumbers", "title", "companyName"
-    }
-    custom_fields = {k: v for k, v in contact.items() if k not in consumed_keys}
+    # 5. job_title
+    job_title = raw.get("title")
+    if job_title:
+        job_title = str(job_title).strip() or None
 
-    return {
-        "provider_id": "streak",
-        "external_id": external_id,
-        "full_name": full_name,
-        "primary_email": primary_email,
-        "phone": phone,
-        "job_title": job_title,
-        "company_name": company_name,
-        "custom_fields": custom_fields
-    }
+    # 6. custom_fields
+    custom_fields = {}
+    for key in ["creationTimestamp", "lastSavedTimestamp"]:
+        if key in raw and raw[key] is not None:
+            custom_fields[key] = raw[key]
+
+    return IncomingContact(
+        provider_id="streak",
+        external_id=str(external_id),
+        full_name=full_name,
+        primary_email=primary_email,
+        phone=phone,
+        job_title=job_title,
+        company_name=None,
+        custom_fields=custom_fields
+    )

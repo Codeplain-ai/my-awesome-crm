@@ -1,0 +1,8 @@
+{
+    "source_hash": "9831115d76f811849a2cc2a8d63395f4c8bf58f14ff04206322a3c5e4bbbb43b",
+    "functionalities": [
+        "- Implement a function that implements :NimbleContactMapping: as a pure function within the integration package.",
+        "- Implement :NimbleIntegration:'s `fetch_contacts()` entry point.\n  - Read :NimbleCredentials: from environment variables. If any required variable is missing or empty, raise `RuntimeError` with a message naming the missing environment variable key (e.g. `NIMBLE_ACCESS_TOKEN`).\n  - Request the first page of contacts from the contacts list endpoint of :NimbleRestAPI: with its pinned query parameters and the Bearer authorization header carrying the access token.\n  - Read every subsequent page per the pagination envelope of :NimbleRestAPI: until all pages are read.\n  - For each record across all pages, map it with :NimbleContactMapping:.\n    - If mapping one record raises `ValueError`, skip that record and log a warning naming its `id`, then continue.\n  - Return the list of successfully mapped :IncomingContact: dicts.",
+        "- Wire :NimbleIntegration: into the host's runtime discovery surface.\n  - `src/integrations/nimble/__init__.py` exports only the top-level callable `fetch_contacts` and re-exports no other names."
+    ]
+}

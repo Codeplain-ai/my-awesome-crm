@@ -1,4 +1,9 @@
-# 🦸 My Awesome CRM
+<p align="center">
+  <img src="assets/mac.png" alt="mac" width="600" />
+</p>
+
+
+# My Awesome CRM
 
 > One contact list to rule them all. Ten CRMs walk into a bar, one tidy address book walks out.
 

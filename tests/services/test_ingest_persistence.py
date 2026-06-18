@@ -50,7 +50,31 @@ def test_persist_merge_existing(session: Session):
     assert merged.id == existing.id
     assert merged.phone == "555-1234"
     
-    # Verify two source links would exist if we added another, 
+    # Verify two source links would exist if we added another,
     # but here we check if the SF link was created.
     sf_link = session.query(SourceLink).filter_by(external_id="sf-1").first()
     assert sf_link.contact_id == existing.id
+
+def test_resync_no_email_no_phone_does_not_duplicate(session: Session):
+    # A contact with neither email nor phone has a None DedupKey. Re-syncing it
+    # must not create a new Contact each time — the SourceLink (provider_id +
+    # external_id) is the authoritative identity.
+    ic = IncomingContact(
+        provider_id="salesforce",
+        external_id="sf-noemail-1",
+        full_name="No Contact Info",
+    )
+
+    first, created_first = persist_incoming_contact(session, ic)
+    assert created_first is True
+
+    # Second sync of the same provider record.
+    second, created_second = persist_incoming_contact(session, ic)
+    assert created_second is False
+    assert second.id == first.id
+
+    # Exactly one Contact and one SourceLink exist.
+    assert len(session.query(Contact).all()) == 1
+    links = session.query(SourceLink).filter_by(external_id="sf-noemail-1").all()
+    assert len(links) == 1
+    assert links[0].contact_id == first.id

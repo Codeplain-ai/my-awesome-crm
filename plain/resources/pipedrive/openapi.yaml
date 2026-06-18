@@ -1,0 +1,240 @@
+openapi: 3.1.0
+info:
+  title: Pipedrive REST API surface used by the pipedrive integration
+  description: >
+    The exact Pipedrive REST API surface the pipedrive integration calls.
+    Grounded in Pipedrive REST API documentation (2026-06-17); no live
+    credentials were available, so this is NOT yet cross-checked against the
+    live API - re-probe read-only (GET /v1/persons) when credentials arrive and
+    let the live API win on any discrepancy.
+
+    API version is pinned to v1 (the version segment lives in the URL path
+    /v1/persons). v1 was chosen over the newer /api/v2/persons for simplicity
+    and stability: v1 authenticates with a plain api_token query parameter and
+    uses straightforward offset pagination (start/limit + next_start), whereas
+    v2 requires the x-api-token header and opaque cursor pagination. v1 remains
+    a supported, stable surface for read access to Persons.
+
+    Authentication is a Pipedrive personal API token passed as the api_token
+    query parameter on every request. The base host is the company-specific
+    domain https://{company}.pipedrive.com (the company subdomain is a runtime
+    configuration value, read from the PIPEDRIVE_COMPANY_DOMAIN environment
+    variable - see servers below); the generic host https://api.pipedrive.com
+    also serves the same v1 endpoints. The documented alternative auth scheme is
+    OAuth 2.0 with an Authorization: Bearer access_token header against the
+    company-domain host; this integration uses the api_token query parameter,
+    not OAuth.
+
+    Dirty-data notes (anticipated, to confirm on the live cross-check): email
+    and phone are each an ARRAY of objects shaped {value, label, primary}, not
+    flat strings - the integration must pick the entry whose primary flag is
+    true, else the first entry, else None. An email value is NOT guaranteed to
+    be a valid email address. Most fields (name, first_name, last_name,
+    job_title, org_id, email, phone) are nullable; only id is always present.
+    org_id may be null, or an object whose name field holds the organization
+    name.
+  version: v1
+servers:
+  - url: "https://{company}.pipedrive.com/v1"
+    description: >
+      The company-specific Pipedrive host for every call. The {company}
+      subdomain is a runtime configuration value read from the
+      PIPEDRIVE_COMPANY_DOMAIN environment variable; it is not a secret. The
+      api_token (env var PIPEDRIVE_API_TOKEN) is appended as a query parameter
+      on every request.
+    variables:
+      company:
+        default: your-company
+        description: >
+          The company subdomain of the Pipedrive account (read from
+          PIPEDRIVE_COMPANY_DOMAIN). For example, if the account is reached at
+          https://acme.pipedrive.com, this value is "acme".
+paths:
+  /persons:
+    get:
+      operationId: listPersons
+      summary: List Person records (one page)
+      description: >
+        Returns one page of Person records. The integration pins the page size
+        via the limit parameter and pages with the start offset. Subsequent
+        pages are fetched by sending additional_data.pagination.next_start as
+        the start parameter on the next request - see
+        components.schemas.ListEnvelope.
+      security:
+        - apiToken: []
+      parameters:
+        - name: api_token
+          in: query
+          required: true
+          description: >
+            The Pipedrive personal API token, read from the PIPEDRIVE_API_TOKEN
+            environment variable. Sent as a query parameter on every request.
+          schema:
+            type: string
+        - name: limit
+          in: query
+          required: true
+          description: >
+            Page size. Pipedrive's maximum for this endpoint is 500; the
+            integration pins 100 (Pipedrive's own default).
+          schema:
+            type: integer
+            const: 100
+        - name: start
+          in: query
+          required: false
+          description: >
+            The pagination offset. Absent (or 0) on the first request; on every
+            subsequent request it is the additional_data.pagination.next_start
+            value from the previous page, passed verbatim.
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: One page of Person records.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ListEnvelope"
+        "401":
+          description: >
+            Missing or invalid api_token (Pipedrive returns success false with
+            an error message and HTTP 401).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+components:
+  securitySchemes:
+    apiToken:
+      type: apiKey
+      in: query
+      name: api_token
+      description: >
+        The Pipedrive personal API token read from the PIPEDRIVE_API_TOKEN
+        environment variable, sent as the api_token query parameter on every
+        request. The documented alternative is OAuth 2.0 with an
+        Authorization: Bearer access_token header; this integration uses the
+        api_token query parameter, not OAuth.
+  schemas:
+    ListEnvelope:
+      type: object
+      description: >
+        Pagination model - the response is a JSON object with success, a data
+        array of Person records, and an additional_data envelope. When more
+        pages exist, additional_data.pagination.more_items_in_collection is
+        true and additional_data.pagination.next_start holds the offset for the
+        next page; send it verbatim as the start query parameter on the next
+        request. Stop when more_items_in_collection is false (then next_start is
+        absent). data may be null when there are no records.
+      required: [success]
+      properties:
+        success:
+          type: boolean
+        data:
+          type: [array, "null"]
+          items:
+            $ref: "#/components/schemas/ContactRecord"
+        additional_data:
+          type: object
+          properties:
+            pagination:
+              $ref: "#/components/schemas/Pagination"
+    Pagination:
+      type: object
+      description: >
+        The offset pagination envelope. start and limit echo the request;
+        more_items_in_collection indicates whether further records exist;
+        next_start is present only when more_items_in_collection is true.
+      properties:
+        start:
+          type: integer
+        limit:
+          type: integer
+        more_items_in_collection:
+          type: boolean
+        next_start:
+          type: integer
+          description: Present only when more_items_in_collection is true.
+    ContactRecord:
+      type: object
+      description: >
+        One Person entry of data[]. Only id is guaranteed present; every other
+        field is nullable. email and phone are each an ARRAY of objects shaped
+        {value, label, primary} - the integration picks the entry whose primary
+        flag is true, else the first entry, else None. An email value is NOT
+        guaranteed to be a valid email address. org_id may be null or an object
+        carrying the organization name under its name field; org_name (when
+        present) mirrors that name as a flat string.
+      required: [id]
+      properties:
+        id:
+          type: integer
+          description: The Pipedrive person id.
+        name:
+          type: [string, "null"]
+          description: Full display name.
+        first_name:
+          type: [string, "null"]
+        last_name:
+          type: [string, "null"]
+        email:
+          type: [array, "null"]
+          items:
+            $ref: "#/components/schemas/ContactPoint"
+        phone:
+          type: [array, "null"]
+          items:
+            $ref: "#/components/schemas/ContactPoint"
+        job_title:
+          type: [string, "null"]
+        org_id:
+          oneOf:
+            - type: "null"
+            - type: object
+              description: >
+                Nested organization object. Null when the person has no
+                organization. Its name field holds the organization name.
+              properties:
+                value:
+                  type: [integer, "null"]
+                  description: The organization id.
+                name:
+                  type: [string, "null"]
+                  description: The organization name.
+              additionalProperties: true
+        org_name:
+          type: [string, "null"]
+          description: Flat mirror of the organization name, when present.
+      additionalProperties: true
+    ContactPoint:
+      type: object
+      description: >
+        One entry of the email[] or phone[] array. value carries the email
+        address or phone number; primary marks the preferred entry.
+      properties:
+        value:
+          type: [string, "null"]
+        label:
+          type: [string, "null"]
+          description: Free-form label such as "work" or "home".
+        primary:
+          type: [boolean, "null"]
+          description: True for the preferred entry of the array.
+      additionalProperties: true
+    ErrorEnvelope:
+      type: object
+      description: >
+        Pipedrive error bodies are a JSON object carrying success false plus an
+        error message and an error_info string (to confirm against the live API
+        when credentials arrive).
+      required: [success, error]
+      properties:
+        success:
+          type: boolean
+        error:
+          type: string
+        error_info:
+          type: string
+        errorCode:
+          type: integer

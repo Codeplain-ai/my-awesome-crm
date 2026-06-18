@@ -1,0 +1,8 @@
+{
+    "source_hash": "b4847cea5a5d273f9d57d7440ce089b1c26cd47078a82dba361a4c5a334d3ddd",
+    "functionalities": [
+        "- Implement a function that implements :StreakContactMapping: as a pure function within the integration package.",
+        "- Implement :StreakIntegration:'s `fetch_contacts()` entry point.\n  - Read :StreakCredentials: from environment variables. If any required variable is missing or empty, raise `RuntimeError` with a message naming the missing environment variable key (e.g. `STREAK_API_KEY`).\n  - Authenticate every request by sending the API key via HTTP Basic per :StreakRestAPI: (the key is the username, the password is empty).\n  - List every team the key can access from the teams endpoint of :StreakRestAPI:.\n  - For each team, request that team's full contact list from the team contacts endpoint of :StreakRestAPI:.\n    - The team contact list is a single plain array - Streak documents no intra-team pagination, so each team is read in one call and the per-team results are concatenated across all teams.\n  - For each record across all teams, map it with :StreakContactMapping:.\n    - If mapping one record raises `ValueError`, skip that record and log a warning naming its `key`, then continue.\n  - Return the list of successfully mapped :IncomingContact: dicts.",
+        "- Wire :StreakIntegration: into the host's runtime discovery surface.\n  - `src/integrations/streak/__init__.py` exports only the top-level callable `fetch_contacts` and re-exports no other names."
+    ]
+}

@@ -1,0 +1,225 @@
+openapi: 3.1.0
+info:
+  title: Streak REST API surface used by the streak integration
+  description: >
+    The exact Streak (Streak CRM for Gmail) REST API surface the streak
+    integration calls. Grounded in the Streak REST API documentation
+    (streak.readme.io, 2026-06-17). No live credentials were available, so this
+    surface has NOT yet been cross-checked against the live API — when
+    credentials arrive, re-probe the read-only GET endpoints below and let the
+    live API win on any discrepancy.
+
+    API version is pinned to v2 (the version segment lives in the URL path
+    /api/v2/...). v2 is Streak's current API where Contact is a first-class
+    object; the older v1 API is box-centric and does not expose contacts
+    directly, so v2 is pinned.
+
+    Authentication is HTTP Basic: the Streak API key is the Basic-auth username
+    and the password is empty. The key carries the same access the user has.
+
+    Contacts are team-scoped: every contact belongs to exactly one team, so the
+    integration first lists the teams the key can access, then lists each team's
+    contacts and concatenates them. Streak documents no intra-team pagination
+    for the team contact list (it returns a plain JSON array); the team list is
+    therefore the only fan-out axis.
+
+    Grounding caveat on the listing mechanism: Streak's documented v2 contact
+    surface covers single-contact get/create/update by key and the team-scoped
+    create collection (POST /api/v2/teams/{teamKey}/contacts), but it does NOT
+    explicitly document a GET that lists contacts. The two read endpoints below
+    (the teams list, then a GET on the team-scoped contacts collection) are the
+    documentation-grounded enumeration inference: GET on the same team-scoped
+    collection that documents POST, fanned out over the teams the key can reach.
+    This whole listing path is the highest-priority thing to confirm on the
+    first read-only live probe once credentials arrive; if the live API exposes
+    a different listing shape or pagination, update these paths and the live API
+    wins.
+
+    Dirty-data notes (from the documented schema; unverified against a live
+    portal): emailAddresses and phoneNumbers are arrays that may be empty; an
+    email value is NOT guaranteed to be a valid email address; givenName and
+    familyName may both be absent (Streak requires only that a contact have a
+    name OR at least one email address). Streak models organizations as separate
+    objects linked to contacts, so a contact record carries no reliable company
+    string of its own.
+  version: v2
+servers:
+  - url: https://api.streak.com
+    description: >
+      The single fixed Streak API host for every call (team list and contact
+      list alike). All paths below include the /api/v2 version segment.
+paths:
+  /api/v2/users/me/teams:
+    get:
+      operationId: listMyTeams
+      summary: List the teams the authenticated API key can access
+      description: >
+        Returns every team the API key has access to. Each team carries the
+        `key` used to scope the contact list call below. This is the fan-out
+        axis the integration iterates.
+      security:
+        - basicAuth: []
+      responses:
+        "200":
+          description: The teams accessible to this key.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TeamListEnvelope"
+        "401":
+          description: Missing or invalid API key.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+  /api/v2/teams/{teamKey}/contacts:
+    get:
+      operationId: listTeamContacts
+      summary: List all Contact records for one team
+      description: >
+        Returns the full set of Contact records belonging to the team
+        identified by teamKey. Streak documents no pagination for this list —
+        the response is a plain JSON array of contact objects (one page). The
+        integration calls this once per team returned by listMyTeams and
+        concatenates the results.
+      security:
+        - basicAuth: []
+      parameters:
+        - name: teamKey
+          in: path
+          required: true
+          description: The `key` of a team returned by listMyTeams.
+          schema:
+            type: string
+      responses:
+        "200":
+          description: One team's contacts, as a plain array.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TeamContactsEnvelope"
+        "401":
+          description: Missing or invalid API key.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+        "404":
+          description: Unknown teamKey.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+components:
+  securitySchemes:
+    basicAuth:
+      type: http
+      scheme: basic
+      description: >
+        HTTP Basic authentication. The Streak API key read from the
+        STREAK_API_KEY environment variable is the username; the password is
+        empty. Sent on every request.
+  schemas:
+    TeamListEnvelope:
+      type: array
+      description: >
+        The teams accessible to the key, as a plain JSON array. The integration
+        reads each entry's `key` to drive a contact-list call.
+      items:
+        $ref: "#/components/schemas/Team"
+    Team:
+      type: object
+      description: One team the key can access.
+      required: [key]
+      properties:
+        key:
+          type: string
+          description: The team key used to scope the contact list call.
+        name:
+          type: [string, "null"]
+      additionalProperties: true
+    TeamContactsEnvelope:
+      type: array
+      description: >
+        One team's Contact records, as a plain JSON array. There is no
+        pagination envelope and no continuation marker; the whole list is
+        returned in one response. The integration's multi-source behavior comes
+        from iterating the teams of listMyTeams, not from paging within a team.
+      items:
+        $ref: "#/components/schemas/ContactRecord"
+    ContactRecord:
+      type: object
+      description: >
+        One Streak Contact. emailAddresses and phoneNumbers are arrays of plain
+        strings that may be empty. An email value is NOT guaranteed to be a
+        valid email address. fullName, givenName and familyName may all be null
+        or absent (Streak requires only a name OR at least one email, and the v2
+        read sample did not carry fullName on every record). creationTimestamp
+        and lastSavedTimestamp are millisecond epoch provenance values.
+      required: [key]
+      properties:
+        key:
+          type: string
+          description: The Streak contact id (stable identifier for the contact).
+        teamKey:
+          type: [string, "null"]
+        fullName:
+          type: [string, "null"]
+          description: >
+            Display name when Streak provides it; nullable and not present on
+            every record, so it cannot be relied on as always populated.
+        givenName:
+          type: [string, "null"]
+        familyName:
+          type: [string, "null"]
+        emailAddresses:
+          type: array
+          description: Email addresses for the contact; may be empty; values may be invalid.
+          items:
+            type: string
+        phoneNumbers:
+          type: array
+          description: Phone numbers for the contact; may be empty.
+          items:
+            type: string
+        title:
+          type: [string, "null"]
+          description: The contact's job title.
+        other:
+          type: [string, "null"]
+          description: Free-text notes field.
+        addresses:
+          type: array
+          items:
+            type: string
+        twitterHandle:
+          type: [string, "null"]
+        facebookHandle:
+          type: [string, "null"]
+        linkedinHandle:
+          type: [string, "null"]
+        photoUrl:
+          type: [string, "null"]
+        creationTimestamp:
+          type: [number, "null"]
+          description: Millisecond epoch of contact creation.
+        lastSavedTimestamp:
+          type: [number, "null"]
+          description: Millisecond epoch of the last save.
+        lastUpdatedTimestamp:
+          type: [number, "null"]
+      additionalProperties: true
+    ErrorEnvelope:
+      type: object
+      description: >
+        Streak error bodies are a JSON object carrying a `success` flag and an
+        error message. The exact field set is documentation-derived and not yet
+        live-verified.
+      properties:
+        success:
+          type: [boolean, "null"]
+        error:
+          type: [string, "null"]
+        message:
+          type: [string, "null"]
+      additionalProperties: true

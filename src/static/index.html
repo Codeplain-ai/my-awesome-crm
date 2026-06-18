@@ -6,29 +6,74 @@
   <title>My Awesome CRM</title>
   <style>
     :root {
-      --bg: #0f172a; --panel: #1e293b; --line: #334155;
-      --text: #e2e8f0; --muted: #94a3b8; --accent: #38bdf8; --ok: #4ade80; --err: #f87171;
+      /* Brand palette */
+      --font-brand: 'NeueMontreal', monospace;
+      --color-brand-yellow: #e0ff6e;
+      --color-brand-green: #79fc96;
+      --color-brand-green-light: #c5dcd9;
+      --color-brand-green-dark: #223936;
+      --color-brand-blue: #0a1fd4;
+      --color-brand-black: #0F0F0F;
+      --color-brand-black-light: #121212;
+      --color-brand-white: #ffffff;
+      --color-brand-red: #D00505;
+      --color-brand-gray: #808080;
+      --color-brand-gray-light: #666666;
+      --color-brand-status-error: #dd5353;
+      --color-brand-status-error-light: #fee4e2;
+      --color-brand-status-warning: #dc6803;
+      --color-brand-status-warning-light: #fef0c7;
+      --color-brand-status-success: #79fc96;
+      --color-brand-avatar-bg: #9ca7754d;
+
+      /* Semantic mapping */
+      --bg: var(--color-brand-black);
+      --panel: var(--color-brand-black-light);
+      --line: var(--color-brand-green-dark);
+      --text: var(--color-brand-white);
+      --muted: var(--color-brand-gray);
+      --accent: var(--color-brand-green);
+      --ok: var(--color-brand-status-success);
+      --err: var(--color-brand-status-error);
     }
     * { box-sizing: border-box; }
     body {
-      margin: 0; font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+      margin: 0; font-family: var(--font-brand), system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
       background: var(--bg); color: var(--text); line-height: 1.5;
     }
-    header { padding: 24px 32px; border-bottom: 1px solid var(--line); }
+    header { padding: 24px 32px; border-bottom: 1px solid var(--line); text-align: center; }
     h1 { margin: 0; font-size: 22px; }
-    h1 small { color: var(--muted); font-weight: 400; font-size: 14px; }
+    .tagline { margin: 4px 0 0; color: var(--muted); font-weight: 400; font-size: 14px; }
     main { max-width: 960px; margin: 0 auto; padding: 24px 32px; }
     section { margin-bottom: 32px; }
-    h2 { font-size: 14px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); }
+    h2 {
+      display: flex; align-items: center; gap: 12px;
+      font-size: 14px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted);
+    }
+    .hint { margin: 4px 0 14px; font-size: 13px; color: var(--muted); }
     .integrations { display: flex; flex-wrap: wrap; gap: 10px; }
     button {
       background: var(--panel); color: var(--text); border: 1px solid var(--line);
       padding: 10px 16px; border-radius: 8px; cursor: pointer; font-size: 14px;
-      transition: border-color .15s, background .15s;
+      font-family: inherit; line-height: 1.2;
+      transition: border-color .15s, background .15s, color .15s;
+    }
+    /* Integration buttons: uniform, tidy chips */
+    .integrations button {
+      display: inline-flex; align-items: center; justify-content: center;
+      min-width: 150px; font-weight: 600;
+    }
+    .integrations button:hover:not(:disabled) {
+      border-color: var(--accent); color: var(--accent);
     }
     button:hover:not(:disabled) { border-color: var(--accent); }
     button:disabled { opacity: .5; cursor: progress; }
-    button.refresh { background: transparent; }
+    /* Refresh: quiet, text-only action that lives next to a heading */
+    button.refresh {
+      margin-left: auto; background: transparent; border: none; padding: 4px 6px;
+      color: var(--muted); font-size: 12px; text-transform: none; letter-spacing: 0;
+    }
+    button.refresh:hover:not(:disabled) { color: var(--accent); }
     #status { min-height: 22px; margin: 12px 0; font-size: 14px; }
     #status.ok { color: var(--ok); }
     #status.err { color: var(--err); }
@@ -46,11 +91,13 @@
 </head>
 <body>
   <header>
-    <h1>🦸 My Awesome CRM <small>— one contact list to rule them all</small></h1>
+    <h1>My Awesome CRM</h1>
+    <p class="tagline">one contact list to rule them all</p>
   </header>
   <main>
     <section>
       <h2>Integrations <button class="refresh" onclick="loadIntegrations()">↻ rediscover</button></h2>
+      <p class="hint">Click an integration to sync its contacts into My Awesome CRM.</p>
       <div class="integrations" id="integrations"><span class="empty">Discovering…</span></div>
     </section>
 
@@ -87,7 +134,8 @@
         }
         for (const name of discovered) {
           const btn = document.createElement("button");
-          btn.textContent = "⬇ " + name;
+          btn.textContent = name;
+          btn.title = "Sync My Awesome CRM with " + name;
           btn.onclick = () => ingest(name, btn);
           box.appendChild(btn);
         }
@@ -98,8 +146,13 @@
     }
 
     async function ingest(name, btn) {
-      setStatus("Ingesting from " + name + "…", "");
-      if (btn) btn.disabled = true;
+      setStatus("Syncing with " + name + "…", "");
+      let prevLabel;
+      if (btn) {
+        btn.disabled = true;
+        prevLabel = btn.textContent;
+        btn.textContent = name + " — syncing…";
+      }
       try {
         const res = await fetch("/ingest/" + encodeURIComponent(name));
         const data = await res.json();
@@ -112,7 +165,10 @@
       } catch (e) {
         setStatus("✗ " + name + ": " + e.message, "err");
       } finally {
-        if (btn) btn.disabled = false;
+        if (btn) {
+          btn.disabled = false;
+          btn.textContent = prevLabel;
+        }
       }
     }
 

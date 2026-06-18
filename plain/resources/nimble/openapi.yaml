@@ -1,0 +1,232 @@
+openapi: 3.1.0
+info:
+  title: Nimble REST API surface used by the nimble integration
+  description: >
+    The exact Nimble CRM REST API surface the nimble integration calls.
+    Grounded in Nimble REST API documentation (2026-06-17, nimble.readthedocs.io
+    / nimble.com/developers/docs); no live credentials were available, so this is
+    NOT yet cross-checked against the live API. Re-probe read-only when
+    credentials arrive and let the live API win on any discrepancy.
+
+    API version is pinned to v1 (the version segment lives in the URL path
+    /api/v1/contacts); v1 is Nimble's current public REST API version.
+    Authentication is an OAuth 2.0 access token sent as an HTTP Bearer token.
+
+    Base-host note: the current Nimble docs route data calls to
+    https://app.nimble.com/api/v1/ (the OAuth authorize/token endpoints live on
+    https://api.nimble.com); older docs reference https://api.nimble.com/api/v1.
+    This file pins app.nimble.com per the current docs - re-confirm against the
+    live API when credentials arrive; live API wins.
+
+    Dirty-data notes (the tricky part): Nimble stores each contact field under a
+    `fields` map where every field key (e.g. "first name", "last name", "email",
+    "phone", "title", "company") maps to an ARRAY of entries, each an object with
+    `value`, `modifier`, and optional `group`/`label`. The integration takes the
+    first entry's `value` per field. A field key can be absent, its array empty,
+    or an entry's `value` null - all treated as missing. The email value is NOT
+    guaranteed to be a valid email address. record_type is "person" or "company".
+  version: v1
+servers:
+  - url: https://app.nimble.com/api/v1
+    description: >
+      The Nimble REST API data host for every contacts call. The access token
+      (env var NIMBLE_ACCESS_TOKEN) is sent as a Bearer token on every request;
+      there is no per-account instance URL.
+paths:
+  /contacts:
+    get:
+      operationId: listContacts
+      summary: List Contact records (one page)
+      description: >
+        Returns one page of contact records under `resources`. The integration
+        pins record_type=person and the page size; subsequent pages are fetched
+        by incrementing the `page` query parameter until meta.page reaches
+        meta.pages - see components.schemas.ListEnvelope.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: record_type
+          in: query
+          required: true
+          description: >
+            Restricts results to person contacts. Nimble contacts are either
+            "person" or "company"; the integration emits person contacts only.
+          schema:
+            type: string
+            const: person
+        - name: per_page
+          in: query
+          required: true
+          description: >
+            Page size. Nimble's documented default is 30; the integration pins a
+            fixed page size so pagination is deterministic.
+          schema:
+            type: integer
+            const: 30
+        - name: page
+          in: query
+          required: false
+          description: >
+            The 1-based page number. Absent (or 1) on the first request; on every
+            subsequent request it is the previous page's meta.page plus one,
+            until meta.page equals meta.pages.
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: One page of contact records.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ListEnvelope"
+        "401":
+          description: >
+            Missing or invalid access token (per docs - re-confirm against the
+            live API when credentials arrive).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      description: >
+        Authorization: Bearer <access_token>, where <access_token> is the Nimble
+        OAuth 2.0 access token read from the NIMBLE_ACCESS_TOKEN environment
+        variable, sent on every request.
+  schemas:
+    ListEnvelope:
+      type: object
+      description: >
+        Pagination model - `resources` holds the current page's contacts and
+        `meta` carries the page counters. Pagination is page-based: request
+        page=1, then page=2, ... incrementing by one. Stop when meta.page equals
+        meta.pages (the last page), or when `resources` is empty. meta.total is
+        the count across all pages.
+      required: [resources, meta]
+      properties:
+        resources:
+          type: array
+          items:
+            $ref: "#/components/schemas/ContactRecord"
+        meta:
+          $ref: "#/components/schemas/PageMeta"
+    PageMeta:
+      type: object
+      description: >
+        Page counters returned on every list response (e.g.
+        {"per_page": 30, "total": 238, "pages": 8, "page": 1}).
+      required: [page, pages, per_page, total]
+      properties:
+        page:
+          type: integer
+          description: The 1-based number of the page in this response.
+        pages:
+          type: integer
+          description: Total number of pages available for the query.
+        per_page:
+          type: integer
+          description: Number of records per page.
+        total:
+          type: integer
+          description: Total number of records across all pages.
+        links:
+          type: object
+          description: >
+            Optional convenience links to other pages (e.g. next/prev). Present
+            on some responses; the integration drives pagination from page/pages,
+            not from these links.
+          additionalProperties: true
+    ContactRecord:
+      type: object
+      description: >
+        One contact entry of resources[]. `id` is the record-level identifier and
+        `record_type` is "person" or "company". All business data lives under the
+        `fields` map. Any field key may be absent.
+      required: [id, fields]
+      properties:
+        id:
+          type: string
+          description: The Nimble contact id.
+        record_type:
+          type: [string, "null"]
+          description: '"person" or "company". The integration pins record_type=person.'
+        fields:
+          $ref: "#/components/schemas/ContactFields"
+      additionalProperties: true
+    ContactFields:
+      type: object
+      description: >
+        The contact's field map. Each KEY is a lowercase, space-separated field
+        name (e.g. "first name", "last name", "email", "phone", "title",
+        "company") and each VALUE is an ARRAY of FieldEntry objects. The
+        integration reads the first entry's `value` for each field it consumes.
+        A key may be absent, its array empty, or the first entry's `value` null -
+        all of which mean "missing" for mapping purposes. Other field keys may
+        be present (custom fields, social profiles, etc.).
+      properties:
+        first name:
+          type: array
+          items:
+            $ref: "#/components/schemas/FieldEntry"
+        last name:
+          type: array
+          items:
+            $ref: "#/components/schemas/FieldEntry"
+        email:
+          type: array
+          items:
+            $ref: "#/components/schemas/FieldEntry"
+        phone:
+          type: array
+          items:
+            $ref: "#/components/schemas/FieldEntry"
+        title:
+          type: array
+          items:
+            $ref: "#/components/schemas/FieldEntry"
+        company:
+          type: array
+          items:
+            $ref: "#/components/schemas/FieldEntry"
+      additionalProperties:
+        type: array
+        items:
+          $ref: "#/components/schemas/FieldEntry"
+    FieldEntry:
+      type: object
+      description: >
+        One entry within a field's array (e.g.
+        {"group": "Basic Info", "value": "Flintstone", "label": "last name",
+        "modifier": ""}). `value` carries the actual field value. `modifier` is
+        the field qualifier (empty, or e.g. "work"/"personal"). `group` and
+        `label` are display metadata. `value` may be null or absent.
+      properties:
+        value:
+          type: [string, "null"]
+          description: The field's actual value; may be null or absent.
+        modifier:
+          type: [string, "null"]
+          description: Field qualifier (e.g. "", "work", "personal").
+        group:
+          type: [string, "null"]
+          description: Display group (e.g. "Basic Info", "Contact Info").
+        label:
+          type: [string, "null"]
+          description: Display label for the entry.
+      additionalProperties: true
+    ErrorEnvelope:
+      type: object
+      description: >
+        Nimble error bodies are a JSON object with an error message (per docs;
+        re-confirm the exact shape against the live API when credentials arrive).
+      properties:
+        message:
+          type: [string, "null"]
+        code:
+          type: [string, "null"]
+        error:
+          type: [string, "null"]
+      additionalProperties: true

@@ -1,0 +1,253 @@
+openapi: 3.1.0
+info:
+  title: Salesforce REST API surface used by the salesforce integration
+  description: >
+    The exact Salesforce REST API surface the salesforce integration calls.
+    Grounded in the provider documentation AND verified against the live org
+    (read-only GET probes) — see resources/docs/salesforce/rest-crosscheck.md.
+    Where docs and the live API disagreed, the live API wins.
+    API version is pinned to v60.0 (the live org advertises up to v66.0; v60.0
+    was probed and returns 200; pinned for stability).
+  version: v60.0
+servers:
+  - url: "{SALESFORCE_ENDPOINT}"
+    description: >
+      The org My Domain login host (e.g. https://your-domain.my.salesforce.com),
+      read from the SALESFORCE_ENDPOINT environment variable. Used ONLY for the
+      token request.
+    variables:
+      SALESFORCE_ENDPOINT:
+        default: https://your-domain.my.salesforce.com
+  - url: "{instance_url}"
+    description: >
+      The base URL for every data API call, taken from the instance_url field of
+      the token response — NOT from SALESFORCE_ENDPOINT. On the probed org the
+      two happened to be the same host, but they are not guaranteed to be;
+      always follow instance_url.
+    variables:
+      instance_url:
+        default: https://your-domain.my.salesforce.com
+paths:
+  /services/oauth2/token:
+    post:
+      operationId: acquireToken
+      summary: OAuth 2.0 client-credentials (server-to-server) token request
+      description: >
+        Server lives on the SALESFORCE_ENDPOINT login host. The flow issues no
+        refresh token; a fresh token is acquired on every fetch_contacts() call.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              type: object
+              required: [grant_type, client_id, client_secret]
+              properties:
+                grant_type:
+                  type: string
+                  const: client_credentials
+                client_id:
+                  type: string
+                  description: Connected app consumer key (env var SALESFORCE_CLIENT_ID).
+                client_secret:
+                  type: string
+                  description: Connected app consumer secret (env var SALESFORCE_CLIENT_SECRET).
+      responses:
+        "200":
+          description: Token granted (verified by live probe).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TokenResponse"
+        "400":
+          description: Invalid grant / client error.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+  /services/data/v60.0/query/:
+    get:
+      operationId: queryContacts
+      summary: SOQL query for Contact records (first page)
+      description: >
+        Server is the instance_url from the token response. Subsequent pages are
+        fetched by following nextRecordsUrl verbatim against the same base — see
+        components.schemas.QueryEnvelope.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: q
+          in: query
+          required: true
+          description: >
+            The SOQL query. The integration pins exactly this query; the field
+            list matches the live Contact describe (field names verified to exist).
+          schema:
+            type: string
+            const: >-
+              SELECT Id, Name, FirstName, LastName, Email, Phone, MobilePhone,
+              Title, Account.Name FROM Contact
+        - name: Accept
+          in: header
+          required: true
+          schema:
+            type: string
+            const: application/json
+      responses:
+        "200":
+          description: One page of query results.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/QueryEnvelope"
+              examples:
+                listPage:
+                  summary: Live-captured first page (redacted)
+                  externalValue: ../fixtures/salesforce.contacts.list_page.json
+        "400":
+          description: "Bad SOQL, e.g. an invalid field (live probe: errorCode INVALID_FIELD)."
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+              examples:
+                invalidField:
+                  externalValue: ../fixtures/salesforce.contacts.400_invalid_field.json
+        "401":
+          description: "Invalid or expired bearer token (live probe: errorCode INVALID_SESSION_ID)."
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+              examples:
+                invalidSession:
+                  externalValue: ../fixtures/salesforce.contacts.401_invalid_session.json
+        "404":
+          description: "Nonexistent resource (live probe on record retrieve: errorCode NOT_FOUND)."
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+              examples:
+                notFound:
+                  externalValue: ../fixtures/salesforce.contact.404_not_found.json
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      description: >
+        Authorization: Bearer <access_token> from the token response, sent on
+        every data API request.
+  schemas:
+    TokenResponse:
+      type: object
+      description: Keys verified by live probe.
+      required: [access_token, instance_url, token_type]
+      properties:
+        access_token:
+          type: string
+          description: The bearer token used on every subsequent API call.
+        instance_url:
+          type: string
+          description: The base URL for all later API calls.
+        id:
+          type: string
+        token_type:
+          type: string
+          const: Bearer
+        scope:
+          type: string
+        issued_at:
+          type: string
+        signature:
+          type: string
+    QueryEnvelope:
+      type: object
+      description: >
+        Pagination model — when more pages exist, done is false and
+        nextRecordsUrl holds the RELATIVE path of the next page (e.g.
+        /services/data/v60.0/query/01g...-2000); follow it verbatim against
+        instance_url (never re-encode or append to it). Stop when done is true
+        (then nextRecordsUrl is absent). Default page size is 2000 records;
+        minimum forced batch size is 200.
+      required: [totalSize, done, records]
+      properties:
+        totalSize:
+          type: integer
+        done:
+          type: boolean
+        nextRecordsUrl:
+          type: string
+          description: Present only when done is false.
+        records:
+          type: array
+          items:
+            $ref: "#/components/schemas/ContactRecord"
+    ContactRecord:
+      type: object
+      description: >
+        One Contact entry of records[]. Every record carries an attributes
+        metadata envelope (Salesforce's analogue of Dataverse's @odata.* keys).
+        Any selected field can be null except Id; LastName is required on
+        Contact, so the derived compound Name cannot be naturally empty on the
+        probed org. Email content is NOT guaranteed to be a valid email address
+        (a live contact was found with an invalid character in the domain).
+      required: [attributes, Id]
+      properties:
+        attributes:
+          $ref: "#/components/schemas/RecordAttributes"
+        Id:
+          type: string
+        Name:
+          type: [string, "null"]
+          description: Compound name derived from LastName.
+        FirstName:
+          type: [string, "null"]
+        LastName:
+          type: [string, "null"]
+        Email:
+          type: [string, "null"]
+        Phone:
+          type: [string, "null"]
+        MobilePhone:
+          type: [string, "null"]
+        Title:
+          type: [string, "null"]
+        Account:
+          oneOf:
+            - type: "null"
+            - type: object
+              description: >
+                Nested parent-account object (selected via the relationship
+                field Account.Name) — a nested object, not a flat field. Null
+                when the contact has no parent account.
+              properties:
+                attributes:
+                  $ref: "#/components/schemas/RecordAttributes"
+                Name:
+                  type: [string, "null"]
+      additionalProperties: true
+    RecordAttributes:
+      type: object
+      description: Per-record API metadata envelope; never business data.
+      properties:
+        type:
+          type: string
+        url:
+          type: string
+    ErrorEnvelope:
+      type: array
+      description: >
+        Every error response body is a JSON ARRAY whose entries have errorCode
+        and message (verified by live probes for 400 INVALID_FIELD,
+        401 INVALID_SESSION_ID, 404 NOT_FOUND).
+      items:
+        type: object
+        required: [errorCode, message]
+        properties:
+          errorCode:
+            type: string
+          message:
+            type: string

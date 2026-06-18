@@ -80,26 +80,41 @@ def persist_incoming_contact(
     """
     contact_repo = ContactRepository(session)
     link_repo = SourceLinkRepository(session)
-    
-    dedup_key = compute_dedup_key(incoming)
+
     existing_contact: Contact | None = None
-    
-    if dedup_key:
-        if "@" in dedup_key:
-            existing_contact = contact_repo.get_by_email(dedup_key)
-        elif dedup_key.startswith("name:"):
-            # Extract components from key "name:xxx|phone:yyy"
-            # Note: This lookup is specific to the MVP's string-based key logic
-            try:
-                parts = dedup_key.split("|")
-                name = parts[0].replace("name:", "")
-                phone = parts[1].replace("phone:", "")
-                # This is a simplified search; in a real DB we'd use the exact phone normalization
-                # logic within the SQL query or a dedicated dedup_key column.
-                # For MVP, we'll iterate or use a specific repo method.
-                existing_contact = contact_repo.get_by_phone_and_name(incoming.full_name, incoming.phone)
-            except (IndexError, ValueError):
-                pass
+
+    # 1. Authoritative identity: a SourceLink for (provider_id, external_id) means
+    #    we have already imported this exact provider record. Use its contact so a
+    #    re-sync merges into the same row instead of creating a duplicate. This is
+    #    required for records whose DedupKey is weak or None (e.g. a contact with no
+    #    email and no phone), which would otherwise be re-inserted on every sync.
+    existing_link = link_repo.get_by_provider_external_id(
+        incoming.provider_id,
+        incoming.external_id
+    )
+    if existing_link:
+        existing_contact = contact_repo.get_by_id(existing_link.contact_id)
+
+    # 2. Fallback cross-provider dedup by DedupKey, only when this provider record
+    #    has not been seen before (no SourceLink yet).
+    if existing_contact is None:
+        dedup_key = compute_dedup_key(incoming)
+        if dedup_key:
+            if "@" in dedup_key:
+                existing_contact = contact_repo.get_by_email(dedup_key)
+            elif dedup_key.startswith("name:"):
+                # Extract components from key "name:xxx|phone:yyy"
+                # Note: This lookup is specific to the MVP's string-based key logic
+                try:
+                    parts = dedup_key.split("|")
+                    name = parts[0].replace("name:", "")
+                    phone = parts[1].replace("phone:", "")
+                    # This is a simplified search; in a real DB we'd use the exact phone normalization
+                    # logic within the SQL query or a dedicated dedup_key column.
+                    # For MVP, we'll iterate or use a specific repo method.
+                    existing_contact = contact_repo.get_by_phone_and_name(incoming.full_name, incoming.phone)
+                except (IndexError, ValueError):
+                    pass
 
     now = datetime.now(timezone.utc)
     
@@ -125,12 +140,7 @@ def persist_incoming_contact(
         target_contact = contact_repo.create(new_contact)
         created = True
 
-    # Upsert SourceLink
-    existing_link = link_repo.get_by_provider_external_id(
-        incoming.provider_id, 
-        incoming.external_id
-    )
-    
+    # Upsert SourceLink (already fetched above for dedup-by-identity)
     if existing_link:
         existing_link.last_synced_at = now
         existing_link.contact_id = target_contact.id

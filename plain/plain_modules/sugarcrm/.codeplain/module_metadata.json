@@ -1,0 +1,8 @@
+{
+    "source_hash": "abae3788c26ea8fcc6f0ccae0fba953af5bcf9e8a47786c89e7097e618dc71b0",
+    "functionalities": [
+        "- Implement a function that implements :SugarCrmContactMapping: as a pure function within the integration package.",
+        "- Implement :SugarCrmIntegration:'s `fetch_contacts()` entry point.\n  - Read :SugarCrmCredentials: from environment variables. If any required variable is missing or empty, raise `RuntimeError` with a message naming the missing environment variable key (e.g. `SUGARCRM_ENDPOINT`).\n  - Acquire an access token via the OAuth password-grant token endpoint of :SugarCrmRestAPI:, then send it in the `OAuth-Token` header on every data call as defined by :SugarCrmRestAPI:.\n  - Request the first page of contacts from the contacts list endpoint of :SugarCrmRestAPI: with its pinned field list, pinned page size, and headers.\n  - Read every subsequent page per the pagination envelope of :SugarCrmRestAPI: until all pages are read.\n  - For each record across all pages, map it with :SugarCrmContactMapping:.\n    - If mapping one record raises `ValueError`, skip that record and log a warning naming its `id`, then continue.\n  - Return the list of successfully mapped :IncomingContact: dicts.",
+        "- Wire :SugarCrmIntegration: into the host's runtime discovery surface.\n  - `src/integrations/sugarcrm/__init__.py` exports only the top-level callable `fetch_contacts` and re-exports no other names."
+    ]
+}

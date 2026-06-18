@@ -1,0 +1,249 @@
+openapi: 3.1.0
+info:
+  title: Dynamics 365 (Dataverse) Web API surface used by the dynamics integration
+  description: >
+    The exact Dataverse Web API surface the dynamics integration calls. Grounded
+    in the Microsoft Dataverse Web API documentation AND verified against the live
+    org with read-only GET probes. Where docs and the live API disagreed, the live
+    API wins; every shape below was confirmed against the live org.
+    API version is pinned to v9.2 (the live org serves /api/data/v9.2/ and every
+    probe returned 200).
+  version: v9.2
+servers:
+  - url: "https://login.microsoftonline.com/{DYNAMICS_TENANT_ID}"
+    description: >
+      Azure AD authority. Host for the OAuth 2.0 client-credentials token request
+      ONLY. The tenant id is read from the DYNAMICS_TENANT_ID environment variable.
+    variables:
+      DYNAMICS_TENANT_ID:
+        default: 00000000-0000-0000-0000-000000000000
+  - url: "{DYNAMICS_ENDPOINT}"
+    description: >
+      The Dataverse org base URL (e.g. https://your-org.crm4.dynamics.com), read
+      from the DYNAMICS_ENDPOINT environment variable. Used for every data API call.
+      Unlike Salesforce there is NO instance_url indirection — the token response
+      carries no base URL; data calls go straight to DYNAMICS_ENDPOINT.
+    variables:
+      DYNAMICS_ENDPOINT:
+        default: https://your-org.crm4.dynamics.com
+paths:
+  /oauth2/v2.0/token:
+    post:
+      operationId: acquireToken
+      summary: Azure AD OAuth 2.0 client-credentials token request
+      description: >
+        Server is the login.microsoftonline.com authority with DYNAMICS_TENANT_ID
+        in the path. The flow issues no refresh token; a fresh token is acquired
+        on every fetch_contacts() call.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              type: object
+              required: [grant_type, client_id, client_secret, scope]
+              properties:
+                grant_type:
+                  type: string
+                  const: client_credentials
+                client_id:
+                  type: string
+                  description: Azure AD app registration client id (env var DYNAMICS_CLIENT_ID).
+                client_secret:
+                  type: string
+                  description: Azure AD app registration client secret (env var DYNAMICS_CLIENT_SECRET).
+                scope:
+                  type: string
+                  description: >
+                    The Dataverse resource scope. Always the DYNAMICS_ENDPOINT value
+                    with the suffix "/.default" appended (e.g.
+                    https://your-org.crm4.dynamics.com/.default).
+      responses:
+        "200":
+          description: Token granted (verified by live probe).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TokenResponse"
+        "400":
+          description: Invalid grant / client error (Azure AD error JSON, distinct from Dataverse errors).
+  /api/data/v9.2/contacts:
+    get:
+      operationId: queryContacts
+      summary: OData query for contact records (first page)
+      description: >
+        Server is DYNAMICS_ENDPOINT. Subsequent pages are fetched by following the
+        absolute @odata.nextLink verbatim against the same bearer token — see
+        components.schemas.QueryEnvelope.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: $select
+          in: query
+          required: true
+          description: >
+            The pinned projection. Field names verified to exist on the live
+            contact entity. The integration pins exactly this list.
+          schema:
+            type: string
+            const: contactid,fullname,firstname,lastname,emailaddress1,telephone1,mobilephone,jobtitle
+        - name: $expand
+          in: query
+          required: true
+          description: >
+            Expands the parent-account navigation property to pull the company
+            name. parentcustomerid is a polymorphic lookup (account or contact);
+            parentcustomerid_account resolves only when the parent is an account
+            and is null otherwise.
+          schema:
+            type: string
+            const: parentcustomerid_account($select=name)
+        - name: Accept
+          in: header
+          required: true
+          schema:
+            type: string
+            const: application/json
+        - name: OData-MaxVersion
+          in: header
+          required: true
+          schema:
+            type: string
+            const: "4.0"
+        - name: OData-Version
+          in: header
+          required: true
+          schema:
+            type: string
+            const: "4.0"
+      responses:
+        "200":
+          description: One page of query results.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/QueryEnvelope"
+        "400":
+          description: "Bad query, e.g. an invalid $select field (live probe: code 0x80060888)."
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+        "401":
+          description: >
+            Invalid or expired bearer token. Live probe returned an EMPTY body
+            (text/html, content-length 0) with a WWW-Authenticate challenge header,
+            NOT a JSON error envelope. The integration treats any non-2xx as a hard
+            error that propagates to the caller.
+        "404":
+          description: "Nonexistent record (live probe on record retrieve: code 0x80040217)."
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      description: >
+        Authorization: Bearer <access_token> from the token response, sent on
+        every data API request.
+  schemas:
+    TokenResponse:
+      type: object
+      description: Keys verified by live probe.
+      required: [access_token, token_type, expires_in]
+      properties:
+        access_token:
+          type: string
+          description: The bearer token used on every subsequent API call.
+        token_type:
+          type: string
+          const: Bearer
+        expires_in:
+          type: integer
+          description: Token lifetime in seconds (probed value 3599).
+        ext_expires_in:
+          type: integer
+    QueryEnvelope:
+      type: object
+      description: >
+        Pagination model — when more pages exist, @odata.nextLink holds the
+        ABSOLUTE URL of the next page; follow it verbatim against the same bearer
+        token (never re-encode or append to it). Stop when @odata.nextLink is
+        absent. Default server page size is 5000; a client may request a smaller
+        page via the Prefer: odata.maxpagesize=N request header.
+      required: [value]
+      properties:
+        "@odata.context":
+          type: string
+        "@odata.nextLink":
+          type: string
+          description: Present only when more pages remain; the absolute URL of the next page.
+        value:
+          type: array
+          items:
+            $ref: "#/components/schemas/ContactRecord"
+    ContactRecord:
+      type: object
+      description: >
+        One contact entry of value[]. Each record carries an @odata.etag metadata
+        key (Dataverse's analogue of Salesforce's attributes envelope). Any selected
+        field can be null except contactid. fullname/firstname/lastname can ALL be
+        null on a live record (a nameless contact was found on the probed org), in
+        which case full_name is underivable and the record is skipped. emailaddress1
+        content is NOT guaranteed to be a valid email address.
+      required: [contactid]
+      properties:
+        "@odata.etag":
+          type: string
+          description: Per-record API metadata (row version); never business data.
+        contactid:
+          type: string
+          description: The contact GUID. Maps to external_id.
+        fullname:
+          type: [string, "null"]
+          description: Dataverse's precomputed display name, derived from first/last.
+        firstname:
+          type: [string, "null"]
+        lastname:
+          type: [string, "null"]
+        emailaddress1:
+          type: [string, "null"]
+        telephone1:
+          type: [string, "null"]
+        mobilephone:
+          type: [string, "null"]
+        jobtitle:
+          type: [string, "null"]
+        parentcustomerid_account:
+          oneOf:
+            - type: "null"
+            - type: object
+              description: >
+                The expanded parent account (from $expand=parentcustomerid_account).
+                Null when the contact has no parent account, or the parent is a
+                contact rather than an account.
+              properties:
+                name:
+                  type: [string, "null"]
+      additionalProperties: true
+    ErrorEnvelope:
+      type: object
+      description: >
+        Every Dataverse data-API error body is a JSON OBJECT with an "error" member
+        carrying code and message (verified by live probes for 400 0x80060888 and
+        404 0x80040217). NOTE: this differs from Salesforce, whose error body is a
+        JSON array.
+      required: [error]
+      properties:
+        error:
+          type: object
+          required: [code, message]
+          properties:
+            code:
+              type: string
+            message:
+              type: string

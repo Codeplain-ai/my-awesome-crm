@@ -1,1 +1,1 @@
-# Marks directory as a test package
+# Test package for Pipedrive integration

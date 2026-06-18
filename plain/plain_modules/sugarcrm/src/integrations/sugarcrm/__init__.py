@@ -1,1 +1,3 @@
-from src.integrations.sugarcrm.client import fetch_contacts
+from .fetcher import fetch_contacts
+
+__all__ = ["fetch_contacts"]

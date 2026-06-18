@@ -1,0 +1,277 @@
+openapi: 3.1.0
+info:
+  title: Copper REST API surface used by the copper integration
+  description: >
+    The exact Copper (copper.com, formerly ProsperWorks) Developer REST API
+    surface the copper integration calls.
+
+    Grounded in Copper REST API documentation (2026-06-17); no live credentials
+    were available, so this is NOT yet cross-checked against the live API. When
+    credentials arrive, re-probe the read-only People search POST and let the
+    live API win on any discrepancy, recording the divergence here.
+
+    API version is pinned to v1 (the version segment lives in the URL path
+    /developer_api/v1); v1 is Copper's current and only stable public Developer
+    API version. Authentication is an API key plus the key owner's account email
+    sent as request headers - there is NO OAuth token-exchange step.
+
+    Dirty-data notes from the documentation: emails is an ARRAY of objects
+    (each {email, category}); a record can carry zero, one, or many emails, and
+    an email value is NOT guaranteed to be a valid email address. phone_numbers
+    is likewise an array of {number, category} objects. Most fields are nullable
+    (name, title, company_name, company_id, address can all be null). The record
+    id is a number. custom_fields is an array of {custom_field_definition_id,
+    value} objects rather than a flat map.
+  version: v1
+servers:
+  - url: https://api.copper.com/developer_api/v1
+    description: >
+      The single fixed Copper Developer API host and version prefix for every
+      call. There is no per-account instance URL; the account is identified
+      entirely by the X-PW-AccessToken and X-PW-UserEmail headers.
+paths:
+  /people/search:
+    post:
+      operationId: listPeople
+      summary: List People records (one page) via search
+      description: >
+        Returns one page of People records as a JSON array. The integration
+        pins the page size and walks pages with an increasing page_number.
+        Pagination has no envelope and no cursor - a page that returns fewer
+        than page_size records is the final page (see
+        components.schemas.PageRequest and the response array description).
+      security:
+        - apiKeyAuth: []
+      parameters:
+        - name: X-PW-Application
+          in: header
+          required: true
+          description: Fixed application identifier required on every Copper request.
+          schema:
+            type: string
+            const: developer_api
+        - name: X-PW-UserEmail
+          in: header
+          required: true
+          description: >
+            The account email that owns the API key, read from the
+            COPPER_USER_EMAIL environment variable. Required on every request;
+            omitting it returns 401.
+          schema:
+            type: string
+        - name: Content-Type
+          in: header
+          required: true
+          schema:
+            type: string
+            const: application/json
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PageRequest"
+      responses:
+        "200":
+          description: >
+            One page of People records, as a JSON ARRAY (not wrapped in an
+            envelope). An empty array or a short array (fewer than page_size
+            items) means the last page was reached.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/ContactRecord"
+        "401":
+          description: >
+            Missing or invalid X-PW-AccessToken, or a missing X-PW-UserEmail
+            header.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+        "422":
+          description: Malformed request body (e.g. an out-of-range page_size).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+components:
+  securitySchemes:
+    apiKeyAuth:
+      type: apiKey
+      in: header
+      name: X-PW-AccessToken
+      description: >
+        The Copper API key, read from the COPPER_API_KEY environment variable,
+        sent in the X-PW-AccessToken header on every request. It is paired with
+        the X-PW-UserEmail header (the key owner's account email) and the fixed
+        X-PW-Application: developer_api header.
+  schemas:
+    PageRequest:
+      type: object
+      description: >
+        Pagination model - Copper search uses page-number paging in the request
+        body, not a cursor and not an envelope. The integration pins page_size
+        and starts at page_number 1, incrementing page_number by 1 for each
+        subsequent request. Stop when a page returns fewer than page_size
+        records (an empty array also stops, being shorter than page_size).
+      required: [page_number, page_size]
+      properties:
+        page_number:
+          type: integer
+          description: >
+            The 1-based page index. Copper's default is 1. The integration sends
+            1 for the first page and increments by 1 for each subsequent page.
+          minimum: 1
+        page_size:
+          type: integer
+          description: >
+            Records per page. Copper's default is 20 and its maximum is 200. The
+            integration pins the maximum, 200, on every page request.
+          const: 200
+    ContactRecord:
+      type: object
+      description: >
+        One People entry of the response array. The record id is a NUMBER.
+        emails and phone_numbers are arrays of category-tagged objects; an
+        email value is NOT guaranteed to be a valid email address. name, title,
+        company_name, company_id and address are all nullable. custom_fields is
+        an array of {custom_field_definition_id, value} objects.
+      required: [id]
+      properties:
+        id:
+          type: integer
+          description: The Copper person id (a number, not a string).
+        name:
+          type: [string, "null"]
+          description: Full display name; may be null.
+        first_name:
+          type: [string, "null"]
+        middle_name:
+          type: [string, "null"]
+        last_name:
+          type: [string, "null"]
+        prefix:
+          type: [string, "null"]
+        suffix:
+          type: [string, "null"]
+        title:
+          type: [string, "null"]
+          description: Job title; may be null.
+        company_id:
+          type: [integer, "null"]
+        company_name:
+          type: [string, "null"]
+          description: Flat company name string; may be null.
+        assignee_id:
+          type: [integer, "null"]
+        contact_type_id:
+          type: [integer, "null"]
+        details:
+          type: [string, "null"]
+        address:
+          oneOf:
+            - type: "null"
+            - $ref: "#/components/schemas/Address"
+        emails:
+          type: array
+          description: >
+            Category-tagged email objects. May be empty. The first/primary entry
+            supplies primary_email; an email value is NOT guaranteed valid.
+          items:
+            $ref: "#/components/schemas/EmailEntry"
+        phone_numbers:
+          type: array
+          description: Category-tagged phone objects. May be empty.
+          items:
+            $ref: "#/components/schemas/PhoneEntry"
+        socials:
+          type: array
+          items:
+            type: object
+            additionalProperties: true
+        websites:
+          type: array
+          items:
+            type: object
+            additionalProperties: true
+        tags:
+          type: array
+          items:
+            type: string
+        custom_fields:
+          type: array
+          description: >
+            Each entry pairs a custom_field_definition_id with a value of any
+            JSON type (or null).
+          items:
+            $ref: "#/components/schemas/CustomFieldEntry"
+        date_created:
+          type: [integer, "null"]
+          description: Unix timestamp (seconds) of record creation.
+        date_modified:
+          type: [integer, "null"]
+          description: Unix timestamp (seconds) of last modification.
+        date_last_contacted:
+          type: [integer, "null"]
+        interaction_count:
+          type: [integer, "null"]
+      additionalProperties: true
+    Address:
+      type: object
+      description: Postal address; any subfield may be null.
+      properties:
+        street:
+          type: [string, "null"]
+        city:
+          type: [string, "null"]
+        state:
+          type: [string, "null"]
+        postal_code:
+          type: [string, "null"]
+        country:
+          type: [string, "null"]
+      additionalProperties: true
+    EmailEntry:
+      type: object
+      description: One category-tagged email. The email value is NOT guaranteed valid.
+      properties:
+        email:
+          type: [string, "null"]
+        category:
+          type: [string, "null"]
+          description: e.g. work, home, other.
+      additionalProperties: true
+    PhoneEntry:
+      type: object
+      description: One category-tagged phone number.
+      properties:
+        number:
+          type: [string, "null"]
+        category:
+          type: [string, "null"]
+          description: e.g. work, home, mobile.
+      additionalProperties: true
+    CustomFieldEntry:
+      type: object
+      description: One custom-field value keyed by its definition id.
+      properties:
+        custom_field_definition_id:
+          type: [integer, "null"]
+        value: {}
+      additionalProperties: true
+    ErrorEnvelope:
+      type: object
+      description: >
+        Copper error bodies are a JSON object whose primary field is a
+        human-readable message under the `message` key (a 401 is returned when
+        X-PW-AccessToken or X-PW-UserEmail is missing or invalid).
+      required: [message]
+      properties:
+        message:
+          type: [string, "null"]
+        status:
+          type: [integer, "null"]
+      additionalProperties: true

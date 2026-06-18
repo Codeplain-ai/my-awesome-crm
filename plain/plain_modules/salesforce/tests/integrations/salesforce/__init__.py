@@ -1,1 +1,1 @@
-# Marker for pytest
+# Empty init for pytest collection

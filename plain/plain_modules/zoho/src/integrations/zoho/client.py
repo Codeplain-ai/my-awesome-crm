@@ -1,94 +1,74 @@
 import os
-import requests
-from typing import Any, Dict, Iterable, Optional
-from src.integrations.zoho.mapping import zoho_contact_to_incoming
+import logging
+import httpx
+from typing import Dict, Any, List, Optional, Generator
 
-def _get_credentials() -> Dict[str, str]:
-    """Reads Zoho credentials from the environment."""
-    client_id = os.environ.get("ZOHO_CLIENT_ID", "")
-    client_secret = os.environ.get("ZOHO_CLIENT_SECRET", "")
-    refresh_token = os.environ.get("ZOHO_REFRESH_TOKEN", "")
-    
-    if not client_id:
-        raise RuntimeError("Missing required Zoho credential: ZOHO_CLIENT_ID")
-    if not client_secret:
-        raise RuntimeError("Missing required Zoho credential: ZOHO_CLIENT_SECRET")
-    if not refresh_token:
-        raise RuntimeError("Missing required Zoho credential: ZOHO_REFRESH_TOKEN")
+logger = logging.getLogger(__name__)
 
-    return {
-        "client_id": client_id,
-        "client_secret": client_secret,
-        "refresh_token": refresh_token,
-        "accounts_domain": os.environ.get("ZOHO_ACCOUNTS_DOMAIN", "accounts.zoho.com"),
-        "api_domain": os.environ.get("ZOHO_API_DOMAIN", "www.zohoapis.com"),
-    }
+def get_credentials() -> Dict[str, str]:
+    """Reads Zoho credentials from environment variables."""
+    keys = [
+        "ZOHO_ACCOUNTS_HOST",
+        "ZOHO_API_HOST",
+        "ZOHO_CLIENT_ID",
+        "ZOHO_CLIENT_SECRET",
+        "ZOHO_REFRESH_TOKEN"
+    ]
+    creds = {}
+    for key in keys:
+        val = os.environ.get(key)
+        if not val:
+            raise RuntimeError(f"Missing required environment variable: {key}")
+        creds[key] = val
+    return creds
 
-def _refresh_access_token(client_id: str, client_secret: str, refresh_token: str, accounts_domain: str) -> str:
-    """Exchanges refresh token for a short-lived access token."""
-    url = f"https://{accounts_domain}/oauth/v2/token"
-    params = {
-        "refresh_token": refresh_token,
-        "client_id": client_id,
-        "client_secret": client_secret,
+def get_access_token(creds: Dict[str, str]) -> str:
+    """Exchanges refresh token for access token via Zoho OAuth."""
+    url = f"{creds['ZOHO_ACCOUNTS_HOST'].rstrip('/')}/oauth/v2/token"
+    data = {
         "grant_type": "refresh_token",
+        "client_id": creds["ZOHO_CLIENT_ID"],
+        "client_secret": creds["ZOHO_CLIENT_SECRET"],
+        "refresh_token": creds["ZOHO_REFRESH_TOKEN"]
     }
     
-    response = requests.post(url, params=params)
-    if not response.ok:
-        raise RuntimeError(f"Failed to refresh Zoho token. Status: {response.status_code}, URL: {url}, Body: {response.text}")
-    
-    data = response.json()
-    access_token = data.get("access_token")
-    if not access_token:
-        raise RuntimeError(f"Zoho token response missing access_token: {data}")
+    with httpx.Client() as client:
+        response = client.post(url, data=data)
+        if response.status_code != 200:
+            logger.error(f"Failed to refresh Zoho token: {response.text}")
+            response.raise_for_status()
         
-    return access_token
+        return response.json()["access_token"]
 
-def _get_contacts_page(api_domain: str, access_token: str, page: int) -> Dict[str, Any]:
-    """Fetches a single page of contacts from Zoho CRM."""
-    url = f"https://{api_domain}/crm/v2/Contacts"
-    headers = {"Authorization": f"Zoho-oauthtoken {access_token}"}
-    params = {"page": page, "per_page": 200}
-    
-    response = requests.get(url, headers=headers, params=params)
-    if response.status_code == 204:
-        return {"data": [], "info": {"more_records": False}}
-        
-    if not response.ok:
-        raise RuntimeError(f"Zoho API error. Status: {response.status_code}, URL: {url}, Body: {response.text}")
-        
-    return response.json()
-
-def fetch_contacts() -> list[Dict[str, Any]]:
-    """
-    Main entry point for the Zoho integration.
-    Discovered by the host system.
-    """
-    creds = _get_credentials()
-    access_token = _refresh_access_token(
-        creds["client_id"], 
-        creds["client_secret"], 
-        creds["refresh_token"], 
-        creds["accounts_domain"]
-    )
-    
-    all_contacts = []
+def fetch_raw_contacts(creds: Dict[str, str], token: str) -> Generator[Dict[str, Any], None, None]:
+    """Iterates through Zoho Contact pages and yields raw record dicts."""
+    base_url = f"{creds['ZOHO_API_HOST'].rstrip('/')}/crm/v3/Contacts"
     page = 1
-    has_more = True
+    more_records = True
     
-    while has_more:
-        result = _get_contacts_page(creds["api_domain"], access_token, page)
-        records = result.get("data")
-        
-        if not records:
-            break
+    fields = "id,Full_Name,First_Name,Last_Name,Email,Phone,Mobile,Title,Account_Name"
+    
+    with httpx.Client() as client:
+        while more_records:
+            params = {
+                "fields": fields,
+                "per_page": 200,
+                "page": page
+            }
+            headers = {"Authorization": f"Zoho-oauthtoken {token}"}
             
-        for record in records:
-            all_contacts.append(zoho_contact_to_incoming(record))
+            response = client.get(base_url, params=params, headers=headers)
             
-        info = result.get("info", {})
-        has_more = info.get("more_records", False)
-        page += 1
-        
-    return all_contacts
+            if response.status_code == 204:
+                return  # No more records
+            
+            response.raise_for_status()
+            payload = response.json()
+            
+            data = payload.get("data", [])
+            for record in data:
+                yield record
+            
+            info = payload.get("info", {})
+            more_records = info.get("more_records", False)
+            page += 1

@@ -9,113 +9,36 @@ description: "Salesforce Integration plug-in for the consolidated CRM backend. A
 
 - :SalesforceProvider: is the :Provider: identifier `salesforce` - the folder name `src/integrations/salesforce/` and the value used as `provider_id` on every :IncomingContact: this integration emits.
 
-- :SalesforceCredentials: are the credentials required to authenticate against a Salesforce org using the OAuth 2.0 client-credentials (server-to-server) flow, read from environment variables.
+- :SalesforceIntegration: is the concrete :Integration: for :SalesforceProvider: that pulls Salesforce `Contact` records and yields :IncomingContact: records.
+
+- :SalesforceCredentials: are the :IntegrationCredentials: for :SalesforceProvider:, used to authenticate against a Salesforce org via the OAuth 2.0 client-credentials (server-to-server) flow, read from environment variables.
   - `SALESFORCE_ENDPOINT` - the org My Domain login host, e.g. `https://your-domain.my.salesforce.com` (required)
   - `SALESFORCE_CLIENT_ID` - the connected app consumer key (required)
   - `SALESFORCE_CLIENT_SECRET` - the connected app consumer secret (required)
 
-- :SalesforceIntegration: is the concrete :Integration: for :SalesforceProvider: that pulls Salesforce `Contact` records and yields :IncomingContact: records.
-  - Lives at `src/integrations/salesforce/__init__.py` and exposes a top-level callable `fetch_contacts()`.
-  - Calls the Salesforce REST API over HTTPS using the host's already-available `requests` library.
-  - Reads :SalesforceCredentials: on every call (not at import time), so missing credentials surface as a runtime error - not an import-time crash that breaks the host's discovery loop.
+- :SalesforceRestAPI: is the exact Salesforce REST API surface this integration calls, defined by [resources/salesforce/openapi.yaml](resources/salesforce/openapi.yaml).
 
-***implementation reqs***
-
-- :SalesforceIntegration: reuses the host's already-installed `requests` library (pinned by the host in `requirements.txt`).
-  - It must NOT add any new dependency to `requirements.txt` and must NOT re-pin `requests` - the host already provides it.
-  - It must NOT use any Salesforce-specific SDK; all provider calls are plain HTTPS calls via `requests`.
-
-- :SalesforceIntegration: authenticates with the OAuth 2.0 client-credentials flow before reading contacts.
-  - The token endpoint is `<SALESFORCE_ENDPOINT>/services/oauth2/token`.
-  - The token request is an HTTP POST with a form-encoded body of `grant_type` set to `client_credentials`, `client_id`, and `client_secret`.
-  - The bearer token is taken from the `access_token` field of the JSON response.
-  - The base URL for all later API calls is taken from the `instance_url` field of the same response - not from `SALESFORCE_ENDPOINT`.
-  - The bearer token is sent on every REST API call as the `Authorization: Bearer <token>` header.
-  - The flow issues no refresh token; a fresh token is acquired on every `fetch_contacts()` call.
-
-- :SalesforceIntegration: reads contacts from the Salesforce REST API version `v60.0`.
-  - The query URL is `<instance_url>/services/data/v60.0/query/` with the SOQL passed as the `q` query parameter.
-  - The SOQL is `SELECT Id, Name, FirstName, LastName, Email, Phone, MobilePhone, Title, Account.Name FROM Contact`.
-  - The parent-account name is selected via the relationship field `Account.Name`, which the API returns as a nested object on each record.
-  - Every REST API request sends the headers `Accept: application/json` and `Authorization: Bearer <token>`.
-
-- :SalesforceIntegration: pages through all contacts using the Salesforce REST query pagination model.
-  - Each query response carries a `done` boolean and, when `done` is false, a `nextRecordsUrl` field holding the relative path of the next page.
-  - The next page is fetched from `<instance_url>` joined with the `nextRecordsUrl` path; the path is followed verbatim and never re-encoded or appended to.
-  - The `Accept` and `Authorization` headers are sent on every page request.
-  - Paging stops when a response has `done` set to true; such a response carries no `nextRecordsUrl`.
-
-- :SalesforceIntegration: applies a skip-and-log batch-failure policy for malformed records (global to every functionality).
-  - Live orgs can contain contacts that cannot be mapped (for example a missing or empty `Id`).
-  - When mapping a single contact raises a value error, that one record is skipped and a warning is logged that names the contact's `Id`, then processing continues with the next record.
-  - A skipped record never aborts the batch; `fetch_contacts()` returns all the records that mapped successfully.
-  - Errors that are not per-record mapping failures (missing credentials, auth failure, transport/HTTP errors) are not swallowed - they propagate to the caller.
-
-- :SalesforceIntegration: validates a contact's email before emitting it as `primary_email`.
-  - The host models :IncomingContact:'s `primary_email` as an email-typed field and rejects any invalid email; a single invalid email aborts the host's whole ingest, so the integration must never emit an invalid email.
-  - Email validity is checked with the host's already-installed `email-validator` library, with deliverability / DNS checks disabled, matching how the host validates the field.
-  - An `Email` value that fails this check is emitted as `None` (the contact is still returned) and a warning is logged naming the contact's `Id`; this is not a record-skip.
-  - `email-validator` is already provided by the host in `requirements.txt`; the integration must NOT add or re-pin it.
-
-- The integration package layout under `src/integrations/salesforce/` is:
-  - `__init__.py` - re-exports `fetch_contacts` from `client.py` (kept tiny to honour the host's discovery contract).
-  - `client.py` - reads :SalesforceCredentials:, acquires the token, requests pages, follows pagination, applies skip-and-log, and yields :IncomingContact: dicts.
-  - `mapping.py` - the pure function that converts one raw Salesforce `Contact` record (dict from the REST API) into an :IncomingContact: dict.
-
-- :UnitTests: for the Salesforce integration live under `tests/integrations/salesforce/` and never make real network calls.
-  - All token acquisition and all REST API GET access go through single seams in `client.py` so :UnitTests: can monkey-patch / inject fakes without touching `requests` or the network.
-  - `mapping.py` must be tested with concrete sample Salesforce `Contact` payloads stored inline in the test files as Python dicts; no external fixtures.
-  - :UnitTests: must cover the skip-and-log path: a page containing one unmappable record yields the good records and skips the bad one without raising.
-  - :UnitTests: must cover multi-page pagination: a first page with `done` false carrying `nextRecordsUrl` followed by a final page with `done` true, asserting records from both pages are returned.
-  - :UnitTests: must cover the invalid-email path: a contact whose `Email` is malformed (for example a `&` in the domain) maps to `primary_email` of `None` while the rest of the record maps normally, without raising.
+- :SalesforceContactMapping: is the field-by-field contract for converting one raw Salesforce `Contact` record into an :IncomingContact: dict, fully described in [resources/salesforce/contact-mapping.md](resources/salesforce/contact-mapping.md).
 
 ***test reqs***
 
-- :ConformanceTests: of :SalesforceIntegration: live in `conformance_tests/salesforce/` and target the live Salesforce REST API.
-  - The credential variables required from the environment are `SALESFORCE_ENDPOINT`, `SALESFORCE_CLIENT_ID`, and `SALESFORCE_CLIENT_SECRET`.
-  - These are the same variable names :SalesforceIntegration: reads at runtime.
+- :ConformanceTests: of :SalesforceContactMapping: must generate dummy Salesforce `Contact` records based on the `ContactRecord` schema of :SalesforceRestAPI: and map each one with :SalesforceContactMapping:.
+  - Every generated record must conform to the `ContactRecord` schema of :SalesforceRestAPI:.
+  - Each mapped result must be a valid :IncomingContact: that follows the :SalesforceContactMapping: contract.
+  - This is a pure-function check: it invokes :SalesforceContactMapping: directly on the dummy records and must not call the live API or `fetch_contacts()`.
 
 ***functional specs***
 
-- Implement :SalesforceIntegration:'s contact-to-:IncomingContact: mapping as a pure function `salesforce_contact_to_incoming(contact: dict) -> dict` in `src/integrations/salesforce/mapping.py`.
-  - Input: a dict shaped like one entry of the `records[]` array returned by the Salesforce REST query API for the `Contact` object.
-  - Output: an :IncomingContact: dict with keys `provider_id`, `external_id`, `full_name`, `primary_email`, `phone`, `job_title`, `company_name`, `custom_fields`.
-  - Field mapping rules:
-    - `provider_id` is always the literal string `salesforce` (matches :SalesforceProvider:).
-    - `external_id` is the `Id` field (required - raise `ValueError` if missing or empty).
-    - `full_name` is the `Name` field when present and non-empty, with surrounding whitespace stripped.
-      - Otherwise it is `FirstName` and `LastName` joined by a single space, each treated as empty when null, with surrounding whitespace stripped.
-      - Otherwise raise `ValueError` because :IncomingContact: requires a non-empty `full_name`.
-    - `primary_email` is the `Email` field, lowercased and trimmed, but only when it is a valid email address; otherwise `None`.
-      - A missing or empty `Email` maps to `None`.
-      - A non-empty `Email` that is not a valid email address also maps to `None` so the contact still maps; a warning is logged naming the contact's `Id`.
-      - Email validity is judged the same way the host judges it (see the implementation reqs), so any value emitted here is always accepted by the host's :IncomingContact: contract.
-    - `phone` is the `Phone` field when present and non-empty; otherwise the `MobilePhone` field; otherwise `None`.
-    - `job_title` is the `Title` field, or `None` when missing or empty.
-    - `company_name` is the `Name` value of the nested `Account` object, or `None` when `Account` is null, missing, or has no non-empty name.
-  - `custom_fields` captures every field on the input dict that is not consumed above and is not API metadata.
-    - Consumed keys are `Id`, `Name`, `FirstName`, `LastName`, `Email`, `Phone`, `MobilePhone`, `Title`, and `Account`.
-    - API metadata is the `attributes` key on the record (and any nested `attributes` object); these are never copied.
-    - The nested `Account` object is treated as consumed and is not copied into `custom_fields`.
-    - The remaining keys (for example `Department`) are copied verbatim into a new dict.
+- Implement a function that implements :SalesforceContactMapping: as a pure function within the integration package.
 
-- Implement :SalesforceIntegration:'s client wrapper in `src/integrations/salesforce/client.py`.
-  - It exposes one top-level callable `fetch_contacts()` that returns a list of :IncomingContact: dicts.
-  - On each call:
-    - Read :SalesforceCredentials: from environment variables. If any required variable is missing or empty, raise `RuntimeError` with a message naming the missing variable.
-    - Acquire a bearer token and the instance base URL via the OAuth client-credentials flow described in the implementation reqs.
-    - Request the first page of contacts from the `query` resource with the SOQL, `Accept`, and `Authorization` described in the implementation reqs.
-    - Follow `nextRecordsUrl` verbatim against the instance base URL to read every subsequent page until a response has `done` set to true.
-    - For each record across all pages, map it with `salesforce_contact_to_incoming` from `mapping.py`.
-      - If mapping one record raises `ValueError`, skip that record and log a warning naming its `Id`, then continue.
-    - Return the list of successfully mapped :IncomingContact: dicts.
-  - Token acquisition and each REST API GET must each be reachable through one indirection point.
-    - A module-level `_acquire_token(creds)` returns the bearer token string and the instance base URL.
-    - A module-level `_get_json(url, token)` performs one REST API GET and returns the parsed JSON body.
-    - These seams let :UnitTests: monkey-patch them without touching the real `requests` library.
+- Implement :SalesforceIntegration:'s `fetch_contacts()` entry point.
+  - Read :SalesforceCredentials: from environment variables. If any required variable is missing or empty, raise `RuntimeError` with a message naming the missing environment variable key.
+  - Acquire a bearer token and the instance base URL via the OAuth client-credentials flow of :SalesforceRestAPI:.
+  - Request the first page of contacts from the query endpoint of :SalesforceRestAPI: with its pinned SOQL and headers.
+  - Read every subsequent page per the pagination envelope of :SalesforceRestAPI: until all pages are read.
+  - For each record across all pages, map it with :SalesforceContactMapping:.
+    - If mapping one record raises `ValueError`, skip that record and log a warning naming its `Id`, then continue.
+  - Return the list of successfully mapped :IncomingContact: dicts.
 
 - Wire :SalesforceIntegration: into the host's runtime discovery surface.
-  - `src/integrations/salesforce/__init__.py` re-exports `fetch_contacts` from `client.py`.
-    - The file consists of one line: `from src.integrations.salesforce.client import fetch_contacts`.
-  - No new dependency is added to `requirements.txt` - the integration uses the host's existing `requests` library.
-  - The host's existing `GET /ingest/{integration}` endpoint discovers the integration by the name `salesforce` and invokes `fetch_contacts()` per the host's contract - no host-side code changes are required.
+  - `src/integrations/salesforce/__init__.py` exports only the top-level callable `fetch_contacts` and re-exports no other names.

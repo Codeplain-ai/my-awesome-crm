@@ -1,1 +1,1 @@
-# Empty init for pytest collection
+# Marks the directory as a package for pytest importlib mode.

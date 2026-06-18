@@ -1,1 +1,1 @@
-# Empty file to satisfy pytest collection
+# Marker for pytest collection

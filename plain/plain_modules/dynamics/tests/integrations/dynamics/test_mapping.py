@@ -1,74 +1,75 @@
 import pytest
-from src.integrations.dynamics.mapping import dynamics_contact_to_incoming
+from src.integrations.dynamics.mapping import map_dynamics_contact
 
-def test_mapping_full_record():
-    payload = {
-        "contactid": "uuid-123",
-        "fullname": " John Doe  ",
-        "emailaddress1": "JOHN@example.com",
+def test_map_valid_contact_full():
+    raw = {
+        "contactid": "guid-123",
+        "fullname": "  John Doe  ",
+        "emailaddress1": "JOHN@Example.com",
         "telephone1": "123-456",
-        "jobtitle": "Software Engineer",
-        "department": "Engineering",
+        "jobtitle": "Engineer",
         "parentcustomerid_account": {"name": "Acme Corp"},
-        "@odata.etag": "12345"
+        "other_field": "val",
+        "@odata.etag": "W/123"
     }
-    result = dynamics_contact_to_incoming(payload)
+    result = map_dynamics_contact(raw)
     
     assert result["provider_id"] == "dynamics"
-    assert result["external_id"] == "uuid-123"
+    assert result["external_id"] == "guid-123"
     assert result["full_name"] == "John Doe"
     assert result["primary_email"] == "john@example.com"
     assert result["phone"] == "123-456"
-    assert result["job_title"] == "Software Engineer"
+    assert result["job_title"] == "Engineer"
     assert result["company_name"] == "Acme Corp"
-    assert result["custom_fields"] == {"department": "Engineering"}
+    assert result["custom_fields"] == {"other_field": "val"}
 
-def test_mapping_name_fallback():
-    payload = {
-        "contactid": "uuid-456",
+def test_map_full_name_derivation_from_parts():
+    raw = {
+        "contactid": "guid-2",
         "firstname": "Jane",
-        "lastname": "Smith",
+        "lastname": "Smith"
     }
-    result = dynamics_contact_to_incoming(payload)
+    result = map_dynamics_contact(raw)
     assert result["full_name"] == "Jane Smith"
 
-def test_mapping_invalid_email_logs_and_returns_none(caplog):
-    payload = {
-        "contactid": "uuid-789",
-        "fullname": "Bad Email User",
+def test_map_missing_id_raises_value_error():
+    raw = {"fullname": "No ID"}
+    with pytest.raises(ValueError, match="missing 'contactid'"):
+        map_dynamics_contact(raw)
+
+def test_map_underivable_name_raises_value_error():
+    raw = {"contactid": "guid-3"}
+    with pytest.raises(ValueError, match="no derivable full_name"):
+        map_dynamics_contact(raw)
+
+def test_map_invalid_email_becomes_none():
+    raw = {
+        "contactid": "guid-4",
+        "fullname": "Bad Email",
         "emailaddress1": "not-an-email"
     }
-    result = dynamics_contact_to_incoming(payload)
+    result = map_dynamics_contact(raw)
     assert result["primary_email"] is None
-    assert "invalid emailaddress1" in caplog.text
-    assert "uuid-789" in caplog.text
+    # Rest of fields should still map
+    assert result["full_name"] == "Bad Email"
 
-def test_mapping_missing_id_raises():
-    payload = {"fullname": "No ID"}
-    with pytest.raises(ValueError, match="missing mandatory 'contactid'"):
-        dynamics_contact_to_incoming(payload)
-
-def test_mapping_missing_name_raises():
-    payload = {"contactid": "uuid-000"}
-    with pytest.raises(ValueError, match="has no valid name fields"):
-        dynamics_contact_to_incoming(payload)
-
-def test_mapping_phone_fallback():
-    payload = {
-        "contactid": "uuid-1",
+def test_map_phone_fallback():
+    raw = {
+        "contactid": "guid-5",
         "fullname": "Phone Test",
-        "mobilephone": "999-999"
+        "mobilephone": "987-654"
     }
-    result = dynamics_contact_to_incoming(payload)
-    assert result["phone"] == "999-999"
+    # telephone1 is missing, should use mobilephone
+    result = map_dynamics_contact(raw)
+    assert result["phone"] == "987-654"
 
-def test_mapping_custom_fields_filter_metadata():
-    payload = {
-        "contactid": "id",
-        "fullname": "Name",
-        "custom_key": "value",
-        "@odata.context": "metadata-url"
+def test_map_odata_metadata_filtered():
+    raw = {
+        "contactid": "guid-6",
+        "fullname": "Metadata Test",
+        "@odata.context": "context",
+        "firstname@OData.Community.Display.V1.FormattedValue": "Jane",
+        "real_custom": "keep me"
     }
-    result = dynamics_contact_to_incoming(payload)
-    assert "custom_key" in result["custom_fields"]
-    assert "@odata.context" not in result["custom_fields"]
+    result = map_dynamics_contact(raw)
+    assert result["custom_fields"] == {"real_custom": "keep me"}

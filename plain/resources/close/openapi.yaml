@@ -1,0 +1,190 @@
+openapi: 3.1.0
+info:
+  title: Close REST API surface used by the close integration
+  description: >
+    The exact Close (close.com) REST API surface the close integration calls.
+    Grounded in the provider documentation (Close API docs, 2026-06-17). No
+    credentials were available, so this surface was NOT cross-checked against the
+    live API; it must be re-probed read-only when credentials arrive, and where
+    the docs and the live API ever disagree the live API wins.
+
+    API version is pinned to v1 (the version segment lives in the URL path
+    /api/v1/); v1 is Close's current stable REST API. Authentication is HTTP
+    Basic with the API key as the username and a blank password.
+
+    Dirty-data notes (cannot be verified without live access, recorded as
+    expected caveats): the email value of an emails[] entry is NOT guaranteed to
+    be a valid email address. emails[] and phones[] may be empty arrays. name and
+    title may be null or empty. Skip counts on the probed org are unknown until a
+    live read-only probe is run with real credentials.
+  version: v1
+servers:
+  - url: https://api.close.com/api/v1
+    description: >
+      The single fixed Close API host for every call. The org is identified
+      entirely by the API key supplied via HTTP Basic auth; there is no per-org
+      instance URL.
+paths:
+  /contact/:
+    get:
+      operationId: listContacts
+      summary: List Contact records (one page)
+      description: >
+        Returns one page of Contact records. The integration pins the page size
+        via `_limit` and walks subsequent pages by advancing the `_skip` offset -
+        see components.schemas.ListEnvelope.
+      security:
+        - basicAuth: []
+      parameters:
+        - name: _limit
+          in: query
+          required: true
+          description: >
+            Page size. The integration pins this value. Close's default for this
+            endpoint is 100.
+          schema:
+            type: integer
+            const: 100
+        - name: _skip
+          in: query
+          required: true
+          description: >
+            The offset cursor. Zero on the first request; on every subsequent
+            request it is advanced by `_limit` (the number of records already
+            read) until `has_more` is false.
+          schema:
+            type: integer
+            default: 0
+      responses:
+        "200":
+          description: One page of Contact records.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ListEnvelope"
+        "401":
+          description: Missing or invalid API key.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+components:
+  securitySchemes:
+    basicAuth:
+      type: http
+      scheme: basic
+      description: >
+        HTTP Basic auth. The API key read from the CLOSE_API_KEY environment
+        variable is the username and the password is always empty, so the
+        Authorization header is `Basic base64("<CLOSE_API_KEY>:")`, sent on every
+        request.
+  schemas:
+    ListEnvelope:
+      type: object
+      description: >
+        Pagination model - offset based. `data` carries this page's records and
+        `has_more` is true when further pages exist. To read the next page,
+        advance `_skip` by `_limit` (the number of records already read) and
+        request again. Stop when `has_more` is false.
+      required: [data, has_more]
+      properties:
+        data:
+          type: array
+          items:
+            $ref: "#/components/schemas/ContactRecord"
+        has_more:
+          type: boolean
+          description: True when at least one further page exists.
+        total_results:
+          type: [integer, "null"]
+          description: Total matching records, when the API includes it.
+    ContactRecord:
+      type: object
+      description: >
+        One Contact entry of data[]. A Contact belongs to exactly one Lead
+        (lead_id) and may carry multiple emails and phones. name and title may be
+        null or empty. emails[] and phones[] may be empty arrays. The email value
+        of an emails[] entry is NOT guaranteed to be a valid email address.
+      required: [id, lead_id]
+      properties:
+        id:
+          type: string
+          description: The Close contact id (e.g. "cont_...").
+        name:
+          type: [string, "null"]
+          description: The contact's display name; may be null or empty.
+        title:
+          type: [string, "null"]
+          description: The contact's job title; may be null or empty.
+        lead_id:
+          type: string
+          description: The id of the parent Lead this contact belongs to.
+        organization_id:
+          type: [string, "null"]
+          description: The id of the Close organization that owns the contact.
+        display_name:
+          type: [string, "null"]
+          description: A presentation name Close derives from name.
+        emails:
+          type: array
+          description: Email entries; may be empty.
+          items:
+            $ref: "#/components/schemas/ContactEmail"
+        phones:
+          type: array
+          description: Phone entries; may be empty.
+          items:
+            $ref: "#/components/schemas/ContactPhone"
+        date_created:
+          type: [string, "null"]
+          description: Close record creation timestamp.
+        date_updated:
+          type: [string, "null"]
+          description: Close record last-modified timestamp.
+        created_by:
+          type: [string, "null"]
+        updated_by:
+          type: [string, "null"]
+      additionalProperties: true
+    ContactEmail:
+      type: object
+      description: >
+        One entry of emails[]. The email value is NOT guaranteed to be a valid
+        email address.
+      required: [email]
+      properties:
+        email:
+          type: [string, "null"]
+        type:
+          type: [string, "null"]
+          description: Category label, e.g. office, home, direct.
+        is_unsubscribed:
+          type: [boolean, "null"]
+      additionalProperties: true
+    ContactPhone:
+      type: object
+      description: One entry of phones[].
+      required: [phone]
+      properties:
+        phone:
+          type: [string, "null"]
+        type:
+          type: [string, "null"]
+          description: Category label, e.g. mobile, office, home, fax.
+        country:
+          type: [string, "null"]
+        phone_formatted:
+          type: [string, "null"]
+      additionalProperties: true
+    ErrorEnvelope:
+      type: object
+      description: >
+        Close error bodies are a JSON OBJECT carrying an `error` message string
+        (and, for field-level validation, a `field-errors` map). Not verified
+        against the live API - re-probe when credentials arrive.
+      properties:
+        error:
+          type: [string, "null"]
+        field-errors:
+          type: [object, "null"]
+      additionalProperties: true

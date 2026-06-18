@@ -1,1 +1,1 @@
-# Marker for pytest
+# Package marker for pytest collection

@@ -1,0 +1,270 @@
+openapi: 3.1.0
+info:
+  title: Zendesk Sell REST API surface used by the zendesk_sell integration
+  description: >
+    The exact Zendesk Sell (formerly Base CRM, api.getbase.com) v2 REST API
+    surface the zendesk_sell integration calls. Grounded in the Zendesk Sell
+    developer documentation (2026-06-17): the Contacts resource, the response
+    envelope, the pagination model, and the OAuth 2.0 Bearer auth scheme.
+
+    No live credentials were available at authoring time, so this surface has
+    NOT yet been cross-checked against the live API. When credentials arrive,
+    re-probe the read-only GET paths and let the live API win on any
+    discrepancy, recording the divergence here.
+
+    API version is pinned to v2 (the version segment lives in the URL path
+    /v2/contacts); v2 is Zendesk Sell's current stable CRM API. Authentication
+    is an OAuth 2.0 Bearer access token (Authorization: Bearer <token>); each
+    issued token has a one-hour lifetime, so the integration is supplied a
+    valid access token via its environment and does not perform a token
+    exchange.
+
+    The business contact lives under each item's `data` object, NOT at the item
+    top level. A descriptive User-Agent header is mandatory on every request
+    (requests without one receive 400 Bad Request).
+
+    Dirty-data notes (from the documented field contract): every business field
+    on a contact is nullable except the read-only id, created_at and updated_at.
+    A contact is either a person or an organization, distinguished by the
+    is_organization flag; the integration lists BOTH types (no type filter).
+    For an organization the display name lives in `name`; for a person it lives
+    in first_name / last_name (last_name is required for individuals). The email
+    value is a free-form string and is NOT guaranteed to be a valid email
+    address. organization_name carries the person's linked company name when
+    Sell denormalizes it onto the record; it is not documented for every Sell
+    edition, so it is optional and frequently absent / null.
+  version: v2
+servers:
+  - url: https://api.getbase.com
+    description: >
+      The single fixed Zendesk Sell API host for every call. The portal is
+      identified entirely by the OAuth Bearer access token.
+paths:
+  /v2/contacts:
+    get:
+      operationId: listContacts
+      summary: List Contact records (one page)
+      description: >
+        Returns one page of Contact records (both persons and organizations)
+        wrapped in the standard Sell collection envelope. The integration pins
+        the page size; subsequent pages are fetched by following
+        meta.links.next_page verbatim - see components.schemas.ListEnvelope.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: per_page
+          in: query
+          required: true
+          description: >
+            Page size. Page numbering is 1-based; the default is 25 and the
+            maximum is 100. The integration pins 100 to minimize the number of
+            requests.
+          schema:
+            type: integer
+            const: 100
+        - name: page
+          in: query
+          required: false
+          description: >
+            The 1-based page number. Absent (or 1) on the first request. The
+            integration never constructs this itself after the first page; it
+            follows meta.links.next_page verbatim.
+          schema:
+            type: integer
+        - name: Accept
+          in: header
+          required: true
+          schema:
+            type: string
+            const: application/json
+        - name: User-Agent
+          in: header
+          required: true
+          description: >
+            A descriptive client User-Agent string. Mandatory on every request;
+            requests without one receive 400 Bad Request.
+          schema:
+            type: string
+      responses:
+        "200":
+          description: One page of Contact records in the collection envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ListEnvelope"
+        "401":
+          description: >
+            Missing, invalid, or expired access token. The Sell API requires a
+            valid Bearer token on every request.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      description: >
+        Authorization: Bearer <access_token>, where <access_token> is the
+        Zendesk Sell OAuth 2.0 access token read from the
+        ZENDESK_SELL_ACCESS_TOKEN environment variable, sent on every request.
+  schemas:
+    ListEnvelope:
+      type: object
+      description: >
+        The Sell collection envelope. The top-level `items` array holds one
+        entry per contact; each entry wraps the resource in its own `data`
+        object plus an item-level `meta` carrying the resource type. The
+        top-level `meta` carries pagination - meta.links.next_page is the full
+        URL of the next page. Follow next_page verbatim; stop when next_page is
+        absent from meta.links, which means the current page was the last one.
+      required: [items, meta]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/ContactItem"
+        meta:
+          $ref: "#/components/schemas/CollectionMeta"
+    ContactItem:
+      type: object
+      description: >
+        One entry of items[]. The business data lives under `data`; `meta`
+        carries the item-level resource type only.
+      required: [data]
+      properties:
+        data:
+          $ref: "#/components/schemas/ContactRecord"
+        meta:
+          type: object
+          properties:
+            type:
+              type: string
+              description: The resource type, e.g. "contact".
+    CollectionMeta:
+      type: object
+      description: >
+        Top-level collection metadata. links.next_page is present only when a
+        further page exists; its absence marks the last page.
+      properties:
+        type:
+          type: string
+          description: Always "collection" for a list response.
+        count:
+          type: integer
+          description: Number of items on this page.
+        links:
+          type: object
+          description: >
+            Pagination links. Only pertinent links are included - on the first
+            page first_page and prev_page are omitted; on the last page
+            next_page is omitted.
+          properties:
+            self:
+              type: string
+            next_page:
+              type: string
+              description: Full URL of the next page; absent on the last page.
+            prev_page:
+              type: string
+            first_page:
+              type: string
+            last_page:
+              type: string
+    ContactRecord:
+      type: object
+      description: >
+        One Contact resource - the unwrapped `data` object of an items[] entry
+        (the business contact lives under data, never at the item top level).
+        Every field except id, created_at and updated_at is nullable.
+        is_organization distinguishes a person (false / null) from an
+        organization (true). For an organization the display name is `name`; for
+        a person it is first_name / last_name. organization_name, when present,
+        is the linked company name denormalized onto a person record; it is
+        optional and frequently absent / null. The email value is NOT guaranteed
+        to be a valid email address.
+      required: [id]
+      properties:
+        id:
+          type: integer
+          description: The Sell contact id (read-only).
+        is_organization:
+          type: ["boolean", "null"]
+          description: True for an organization, false/null for a person.
+        contact_id:
+          type: ["integer", "null"]
+          description: Set only for an individual - the parent organization's id.
+        parent_organization_id:
+          type: ["integer", "null"]
+        name:
+          type: [string, "null"]
+          description: Display name; required for organizations.
+        first_name:
+          type: [string, "null"]
+        last_name:
+          type: [string, "null"]
+          description: Required for individuals.
+        organization_name:
+          type: [string, "null"]
+          description: >
+            The linked company name denormalized onto a person record when Sell
+            supplies it; optional and frequently absent / null.
+        title:
+          type: [string, "null"]
+        email:
+          type: [string, "null"]
+        phone:
+          type: [string, "null"]
+        mobile:
+          type: [string, "null"]
+        customer_status:
+          type: [string, "null"]
+        prospect_status:
+          type: [string, "null"]
+        owner_id:
+          type: ["integer", "null"]
+        creator_id:
+          type: ["integer", "null"]
+        custom_fields:
+          type: ["object", "null"]
+          description: Key-value pairs of the portal's custom fields.
+          additionalProperties: true
+        created_at:
+          type: string
+          description: Read-only UTC ISO8601 creation timestamp.
+        updated_at:
+          type: string
+          description: Read-only UTC ISO8601 last-modified timestamp.
+      additionalProperties: true
+    ErrorEnvelope:
+      type: object
+      description: >
+        Sell error bodies carry an `errors` array; each entry has an `error`
+        object describing the failure. Captured from the documented error
+        contract (not yet live-probed).
+      required: [errors]
+      properties:
+        errors:
+          type: array
+          items:
+            type: object
+            properties:
+              error:
+                type: object
+                properties:
+                  code:
+                    type: string
+                  message:
+                    type: string
+                  details:
+                    type: string
+        meta:
+          type: object
+          properties:
+            type:
+              type: string
+            http_status:
+              type: string
+            logref:
+              type: string

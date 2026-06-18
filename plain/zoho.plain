@@ -2,85 +2,46 @@
 import:
   - crm_common
   - integration_testing
-description: "Zoho CRM Integration plug-in for the consolidated CRM backend. Adds src/integrations/zoho/ so that GET /ingest/zoho pulls Contacts from a Zoho CRM org and persists them via the host's dedup pipeline."
+description: "Zoho CRM Integration plug-in for the consolidated CRM backend. Adds src/integrations/zoho/ so that GET /ingest/zoho pulls Contact records from a Zoho CRM org via the v3 REST API and persists them through the host's dedup pipeline."
 ---
 
 ***definitions***
 
 - :ZohoProvider: is the :Provider: identifier `zoho` - the folder name `src/integrations/zoho/` and the value used as `provider_id` on every :IncomingContact: this integration emits.
 
-- :ZohoCredentials: are the credentials required to authenticate against a Zoho CRM org, read from environment variables.
-  - `ZOHO_CLIENT_ID` - OAuth client id of the registered Zoho self-client / server-based application (required)
-  - `ZOHO_CLIENT_SECRET` - OAuth client secret (required)
-  - `ZOHO_REFRESH_TOKEN` - long-lived refresh token issued by Zoho for the granted scopes (required)
-  - `ZOHO_ACCOUNTS_DOMAIN` - Zoho accounts domain for the org's region (optional, defaults to `accounts.zoho.com`; other valid values include `accounts.zoho.eu`, `accounts.zoho.in`, `accounts.zoho.com.au`, `accounts.zoho.jp`)
-  - `ZOHO_API_DOMAIN` - Zoho CRM API domain for the org's region (optional, defaults to `www.zohoapis.com`; mirrors the regional split of `ZOHO_ACCOUNTS_DOMAIN`)
+- :ZohoIntegration: is the concrete :Integration: for :ZohoProvider: that pulls Zoho CRM `Contacts` records and yields :IncomingContact: records.
 
-- :ZohoIntegration: is the concrete :Integration: for :ZohoProvider: that pulls Zoho CRM Contact records and yields :IncomingContact: records.
-  - Lives at `src/integrations/zoho/__init__.py` and exposes a top-level callable `fetch_contacts()`.
-  - Calls the Zoho CRM REST API v2 directly through the `requests` library - no third-party Zoho SDK is used.
-  - Reads :ZohoCredentials: on every call (not at import time), so missing credentials surface as a runtime error - not an import-time crash that breaks the host's discovery loop.
-  - Exchanges the refresh token for a short-lived access token at the start of every call - no token caching is done in this MVP.
+- :ZohoCredentials: are the :IntegrationCredentials: for :ZohoProvider:, used to authenticate against a Zoho CRM org via the OAuth 2.0 refresh-token grant, read from environment variables.
+  - `ZOHO_ACCOUNTS_HOST` - the region-specific Zoho Accounts host used for the token request, e.g. `https://accounts.zoho.com` (required)
+  - `ZOHO_API_HOST` - the region-specific data API host used for Contacts calls, e.g. `https://www.zohoapis.com` (required)
+  - `ZOHO_CLIENT_ID` - the Zoho API client id (required)
+  - `ZOHO_CLIENT_SECRET` - the Zoho API client secret (required)
+  - `ZOHO_REFRESH_TOKEN` - the long-lived refresh token exchanged for access tokens (required)
 
-***implementation reqs***
+- :ZohoRestAPI: is the exact Zoho CRM v3 REST API surface this integration calls, defined by [resources/zoho/openapi.yaml](resources/zoho/openapi.yaml).
 
-- :ZohoIntegration: should be implemented using the `requests` library to talk to Zoho's REST API v2.
-  - `requests` is already pinned in `requirements.txt` (`requests >= 2.31, < 3.0`); no new dependency is added.
-  - All Zoho CRM data calls target `https://{ZOHO_API_DOMAIN}/crm/v2`.
-  - All Zoho OAuth token calls target `https://{ZOHO_ACCOUNTS_DOMAIN}/oauth/v2/token`.
-
-- The integration package layout under `src/integrations/zoho/` is:
-  - `__init__.py` - re-exports `fetch_contacts` from `client.py` (kept tiny to honour the host's discovery contract).
-  - `client.py` - the Zoho HTTP client wrapper - reads :ZohoCredentials:, refreshes the access token, paginates through `/crm/v2/Contacts`, and yields :IncomingContact: dicts.
-  - `mapping.py` - the pure function that converts a raw Zoho CRM Contact record (a dict matching the `data[]` entries in the Zoho REST API response) into an :IncomingContact: dict.
-
-- :UnitTests: for the Zoho integration live under `tests/integrations/zoho/` and never make real network calls.
-  - Both the token-exchange call and the contacts-list call go through one indirection point each in `client.py` so :UnitTests: can monkey-patch them independently without touching the network.
-  - `mapping.py` must be tested with concrete sample Zoho CRM Contact payloads (stored inline in the test files as Python dicts; no external fixtures).
+- :ZohoContactMapping: is the field-by-field contract for converting one raw Zoho CRM `Contacts` record into an :IncomingContact: dict, fully described in [resources/zoho/contact-mapping.md](resources/zoho/contact-mapping.md).
 
 ***test reqs***
 
-- :ConformanceTests: of :ZohoIntegration: live in `conformance_tests/zoho/` and target the live Zoho CRM API.
-  - The credential variables required from the environment are `ZOHO_CLIENT_ID`, `ZOHO_CLIENT_SECRET`, and `ZOHO_REFRESH_TOKEN`.
+- :ConformanceTests: of :ZohoContactMapping: must generate dummy Zoho CRM `Contacts` records based on the `ContactRecord` schema of :ZohoRestAPI: and map each one with :ZohoContactMapping:.
+  - Every generated record must conform to the `ContactRecord` schema of :ZohoRestAPI:.
+  - Each mapped result must be a valid :IncomingContact: that follows the :ZohoContactMapping: contract.
+  - This is a pure-function check: it invokes :ZohoContactMapping: directly on the dummy records and must not call the live API or `fetch_contacts()`.
 
 ***functional specs***
 
-- Implement :ZohoIntegration:'s Zoho-contact-to-:IncomingContact: mapping as a pure function `zoho_contact_to_incoming(record: dict) -> dict` in `src/integrations/zoho/mapping.py`.
-  - Input: a dict shaped like a Zoho CRM Contact record (one entry of the `data[]` array returned by `GET /crm/v2/Contacts`).
-  - Output: an :IncomingContact: dict with keys `provider_id`, `external_id`, `full_name`, `primary_email`, `phone`, `job_title`, `company_name`, `custom_fields`.
-  - Field mapping rules:
-    - `provider_id` is always the literal string `zoho` (matches :ZohoProvider:).
-    - `external_id` is the Zoho `id` field, converted to a string (required - raise `ValueError` if missing or empty).
-    - `full_name` is the Zoho `Full_Name` field when present and non-empty.
-      - Otherwise fall back to concatenating `First_Name` and `Last_Name` separated by a single space, with surrounding whitespace stripped.
-      - If still empty, raise `ValueError` because :IncomingContact: requires a non-empty `full_name`.
-    - `primary_email` is the Zoho `Email` field, lowercased and trimmed, or `None` when the field is missing or empty.
-    - `phone` is the Zoho `Phone` field as-is (no normalization), or `None` when missing or empty.
-    - `job_title` is the Zoho `Title` field, or `None` when missing or empty.
-    - `company_name` is read from the Zoho `Account_Name` field. Zoho returns this as either a nested object shaped like `{"id": "...", "name": "..."}` or as a plain string.
-      - When it is a dict, use its `name` key.
-      - When it is a non-empty string, use it as-is.
-      - Otherwise return `None`.
-  - `custom_fields` captures every top-level key on the input dict that is **not** consumed by the unified schema above (i.e. not in `{id, Full_Name, First_Name, Last_Name, Email, Phone, Title, Account_Name}`). The remaining keys are copied verbatim into a new dict.
+- Implement a function that implements :ZohoContactMapping: as a pure function within the integration package.
 
-- Implement :ZohoIntegration:'s client wrapper in `src/integrations/zoho/client.py`.
-  - It exposes one top-level callable `fetch_contacts()` that returns a list of :IncomingContact: dicts.
-  - On each call:
-    - Read :ZohoCredentials: from environment variables. If `ZOHO_CLIENT_ID`, `ZOHO_CLIENT_SECRET`, or `ZOHO_REFRESH_TOKEN` is missing or empty, raise `RuntimeError` with a message naming the missing variable.
-    - Exchange the refresh token for a short-lived access token by POSTing form-urlencoded params `{refresh_token, client_id, client_secret, grant_type: "refresh_token"}` to `https://{ZOHO_ACCOUNTS_DOMAIN}/oauth/v2/token`. Extract the `access_token` from the response body.
-    - Use the access token in the `Authorization: Zoho-oauthtoken {access_token}` header for every subsequent API call.
-    - Page through all contacts using Zoho's `page` / `per_page` pagination:
-      - Initial request: `GET https://{ZOHO_API_DOMAIN}/crm/v2/Contacts?per_page=200&page=1`.
-      - Each response is a JSON object with `data` (list of records, may be missing on an empty result) and `info` (object containing `more_records` (bool) and `page` (int)).
-      - After processing each page, continue with `page = page + 1` while `info.more_records` is `True`.
-      - Stop when `data` is missing/empty or `info.more_records` is `False`/missing.
-    - For each record in `data`, pass it through `zoho_contact_to_incoming` from `mapping.py` and append to the returned list.
-    - If any HTTP response has a non-2xx status code, raise `RuntimeError` with the status code, the URL, and the response body included in the message - this lets the host's `GET /ingest/{integration}` endpoint surface it as an HTTP 502.
-  - The HTTP calls must be reachable through two distinct indirection points so :UnitTests: can monkey-patch them independently:
-    - `_refresh_access_token(client_id: str, client_secret: str, refresh_token: str, accounts_domain: str) -> str` - performs the token POST and returns the access token string.
-    - `_get_contacts_page(api_domain: str, access_token: str, page: int) -> dict` - performs `GET /crm/v2/Contacts?per_page=200&page=<page>` with the bearer header and returns the parsed JSON body.
+- Implement :ZohoIntegration:'s `fetch_contacts()` entry point.
+  - Read :ZohoCredentials: from environment variables. If any required variable is missing or empty, raise `RuntimeError` with a message naming the missing environment variable key (e.g. `ZOHO_REFRESH_TOKEN`).
+  - Acquire a bearer access token via the OAuth refresh-token grant of :ZohoRestAPI:, sent on subsequent calls as the `Zoho-oauthtoken` authorization scheme of :ZohoRestAPI:.
+  - Request the first page of contacts from the Contacts list endpoint of :ZohoRestAPI: with its pinned fields list, pinned page size, and the authorization header.
+  - Read every subsequent page per the pagination envelope of :ZohoRestAPI: until `info.more_records` is false.
+  - Treat a 204 No Content (empty body) response as zero records for that request.
+  - For each record across all pages, map it with :ZohoContactMapping:.
+    - If mapping one record raises `ValueError`, skip that record and log a warning naming its `id`, then continue.
+  - Return the list of successfully mapped :IncomingContact: dicts.
 
 - Wire :ZohoIntegration: into the host's runtime discovery surface.
-  - `src/integrations/zoho/__init__.py` re-exports `fetch_contacts` from `client.py` (the file consists of one line: `from src.integrations.zoho.client import fetch_contacts`).
-  - No new entries are added to `requirements.txt`; `requests` is already pinned by the Pipedrive integration.
-  - The host's existing `GET /ingest/{integration}` endpoint will discover the integration by name `zoho` and invoke `fetch_contacts()` per the host's contract - no host-side code changes are required.
+  - `src/integrations/zoho/__init__.py` exports only the top-level callable `fetch_contacts` and re-exports no other names.

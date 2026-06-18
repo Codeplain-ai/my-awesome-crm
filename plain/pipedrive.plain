@@ -2,76 +2,41 @@
 import:
   - crm_common
   - integration_testing
-description: "Pipedrive Integration plug-in for the consolidated CRM backend. Adds src/integrations/pipedrive/ so that GET /ingest/pipedrive pulls persons from a Pipedrive company and persists them via the host's dedup pipeline."
+description: "Pipedrive Integration plug-in for the consolidated CRM backend. Adds src/integrations/pipedrive/ so that GET /ingest/pipedrive pulls Person records from a Pipedrive account via the v1 REST API and persists them through the host's dedup pipeline."
 ---
 
 ***definitions***
 
 - :PipedriveProvider: is the :Provider: identifier `pipedrive` - the folder name `src/integrations/pipedrive/` and the value used as `provider_id` on every :IncomingContact: this integration emits.
 
-- :PipedriveCredentials: are the credentials required to authenticate against a Pipedrive company account, read from environment variables.
-  - `PIPEDRIVE_API_TOKEN` - Pipedrive personal API token (required, sent as the `api_token` query string parameter on every request)
-  - `PIPEDRIVE_COMPANY_DOMAIN` - the company subdomain, used to build the API base URL `https://{domain}.pipedrive.com/v1` (required)
+- :PipedriveIntegration: is the concrete :Integration: for :PipedriveProvider: that pulls Pipedrive `Person` records and yields :IncomingContact: records.
 
-- :PipedriveIntegration: is the concrete :Integration: for :PipedriveProvider: that pulls Pipedrive Person records and yields :IncomingContact: records.
-  - Lives at `src/integrations/pipedrive/__init__.py` and exposes a top-level callable `fetch_contacts()`.
-  - Calls the Pipedrive REST API v1 directly through the `requests` library - no third-party Pipedrive SDK is used.
-  - Reads :PipedriveCredentials: on every call (not at import time), so missing credentials surface as a runtime error - not an import-time crash that breaks the host's discovery loop.
+- :PipedriveCredentials: are the :IntegrationCredentials: for :PipedriveProvider:, a Pipedrive personal API token plus the account's company subdomain, read from environment variables.
+  - `PIPEDRIVE_API_TOKEN` - the Pipedrive personal API token, sent as the `api_token` query parameter (required)
+  - `PIPEDRIVE_COMPANY_DOMAIN` - the company subdomain of the account, e.g. `acme` for `https://acme.pipedrive.com` (required)
 
-***implementation reqs***
+- :PipedriveRestAPI: is the exact Pipedrive REST API surface this integration calls, defined by [resources/pipedrive/openapi.yaml](resources/pipedrive/openapi.yaml).
 
-- :PipedriveIntegration: should be implemented using the `requests` library to talk to Pipedrive's REST API v1.
-  - The `requests` package is already a transitive dependency of FastAPI's test client, but the integration must declare an explicit direct pin in `requirements.txt` (`requests >= 2.31, < 3.0`).
-  - All Pipedrive API calls target the company-scoped base URL `https://{PIPEDRIVE_COMPANY_DOMAIN}.pipedrive.com/v1`.
-
-- The integration package layout under `src/integrations/pipedrive/` is:
-  - `__init__.py` - re-exports `fetch_contacts` from `client.py` (kept tiny to honour the host's discovery contract).
-  - `client.py` - the Pipedrive HTTP client wrapper - reads :PipedriveCredentials:, paginates through `/v1/persons`, and yields :IncomingContact: dicts.
-  - `mapping.py` - the pure function that converts a raw Pipedrive Person record (a dict matching the `data[]` entries in the Pipedrive REST API response) into an :IncomingContact: dict.
-
-- :UnitTests: for the Pipedrive integration live under `tests/integrations/pipedrive/` and never make real network calls.
-  - All Pipedrive API access goes through a single seam in `client.py` so :UnitTests: can monkey-patch / inject a fake.
-  - `mapping.py` must be tested with concrete sample Pipedrive Person payloads (stored inline in the test files as Python dicts; no external fixtures).
+- :PipedriveContactMapping: is the field-by-field contract for converting one raw Pipedrive `Person` record into an :IncomingContact: dict, fully described in [resources/pipedrive/contact-mapping.md](resources/pipedrive/contact-mapping.md).
 
 ***test reqs***
 
-- :ConformanceTests: of :PipedriveIntegration: live in `conformance_tests/pipedrive/` and target the live Pipedrive API.
-  - The credential variables required from the environment are `PIPEDRIVE_API_TOKEN` and `PIPEDRIVE_COMPANY_DOMAIN`.
+- :ConformanceTests: of :PipedriveContactMapping: must generate dummy Pipedrive `Person` records based on the `ContactRecord` schema of :PipedriveRestAPI: and map each one with :PipedriveContactMapping:.
+  - Every generated record must conform to the `ContactRecord` schema of :PipedriveRestAPI:.
+  - Each mapped result must be a valid :IncomingContact: that follows the :PipedriveContactMapping: contract.
+  - This is a pure-function check: it invokes :PipedriveContactMapping: directly on the dummy records and must not call the live API or `fetch_contacts()`.
 
 ***functional specs***
 
-- Implement :PipedriveIntegration:'s Pipedrive-person-to-:IncomingContact: mapping as a pure function `pipedrive_person_to_incoming(person: dict) -> dict` in `src/integrations/pipedrive/mapping.py`.
-  - Input: a dict shaped like a Pipedrive Person record (one entry of the `data[]` array returned by `GET /v1/persons`).
-  - Output: an :IncomingContact: dict with keys `provider_id`, `external_id`, `full_name`, `primary_email`, `phone`, `job_title`, `company_name`, `custom_fields`.
-  - Field mapping rules:
-    - `provider_id` is always the literal string `pipedrive` (matches :PipedriveProvider:).
-    - `external_id` is the Pipedrive `id` field, converted to a string (required - raise `ValueError` if missing).
-    - `full_name` is the Pipedrive `name` field when present and non-empty.
-      - Otherwise fall back to concatenating `first_name` and `last_name` separated by a single space, with surrounding whitespace stripped.
-      - If still empty, raise `ValueError` because :IncomingContact: requires a non-empty `full_name`.
-    - `primary_email` comes from the Pipedrive `email` field, which is a list of `{"value": ..., "primary": bool, "label": ...}` entries.
-      - Pick the entry whose `primary` is truthy; if none is marked primary, pick the first entry that has a non-empty `value`.
-      - The chosen value is lowercased and trimmed before being returned. If no entry has a non-empty `value`, return `None`.
-    - `phone` follows the same rule as `primary_email` but reads the `phone` list, returns the chosen value as-is (no normalization), or `None` if no entry has a value.
-    - `job_title` is the Pipedrive `job_title` field, or `None` when missing or empty.
-    - `company_name` is the Pipedrive `org_name` field, or `None` when missing or empty.
-  - `custom_fields` captures every top-level key on the input dict that is **not** consumed by the unified schema above (i.e. not in `{id, name, first_name, last_name, email, phone, job_title, org_name}`). The remaining keys are copied verbatim into a new dict.
+- Implement a function that implements :PipedriveContactMapping: as a pure function within the integration package.
 
-- Implement :PipedriveIntegration:'s client wrapper in `src/integrations/pipedrive/client.py`.
-  - It exposes one top-level callable `fetch_contacts()` that returns a list of :IncomingContact: dicts.
-  - On each call:
-    - Read :PipedriveCredentials: from environment variables. If `PIPEDRIVE_API_TOKEN` or `PIPEDRIVE_COMPANY_DOMAIN` is missing or empty, raise `RuntimeError` with a message naming the missing variable.
-    - Build the request URL `https://{PIPEDRIVE_COMPANY_DOMAIN}.pipedrive.com/v1/persons`.
-    - Page through all persons using Pipedrive's `start` / `limit` pagination:
-      - Initial request: `params = {"api_token": <token>, "start": 0, "limit": 100}`.
-      - Each response is a JSON object with `data` (list of persons or `null`) and `additional_data.pagination` (object containing `more_items_in_collection` (bool) and `next_start` (int)).
-      - After processing each page, continue with `start = next_start` while `more_items_in_collection` is `True`.
-      - When `data` is `null` or empty, stop paginating.
-    - For each record in `data`, pass it through `pipedrive_person_to_incoming` from `mapping.py` and append to the returned list.
-    - If any HTTP response has a non-2xx status code, raise `RuntimeError` with the status code and the response body included in the message - this lets the host's `GET /ingest/{integration}` endpoint surface it as an HTTP 502.
-  - The HTTP call must be reachable through one indirection point - a module-level function `_get(url: str, params: dict) -> dict` that performs `requests.get(...)`, raises on non-2xx, and returns the parsed JSON. :UnitTests: monkey-patch `_get` to inject canned responses without touching the network.
+- Implement :PipedriveIntegration:'s `fetch_contacts()` entry point.
+  - Read :PipedriveCredentials: from environment variables. If any required variable is missing or empty, raise `RuntimeError` with a message naming the missing environment variable key (e.g. `PIPEDRIVE_API_TOKEN`).
+  - Request the first page of persons from the persons list endpoint of :PipedriveRestAPI: with its pinned page size and the `api_token` query parameter, against the company host derived from `PIPEDRIVE_COMPANY_DOMAIN`.
+  - Read every subsequent page per the pagination envelope of :PipedriveRestAPI: until all pages are read.
+  - For each record across all pages, map it with :PipedriveContactMapping:.
+    - If mapping one record raises `ValueError`, skip that record and log a warning naming its `id`, then continue.
+  - Return the list of successfully mapped :IncomingContact: dicts.
 
 - Wire :PipedriveIntegration: into the host's runtime discovery surface.
-  - `src/integrations/pipedrive/__init__.py` re-exports `fetch_contacts` from `client.py` (the file consists of one line: `from src.integrations.pipedrive.client import fetch_contacts`).
-  - `requests >= 2.31, < 3.0` is added to `requirements.txt` as a direct, explicit dependency.
-  - The host's existing `GET /ingest/{integration}` endpoint will discover the integration by name `pipedrive` and invoke `fetch_contacts()` per the host's contract - no host-side code changes are required.
+  - `src/integrations/pipedrive/__init__.py` exports only the top-level callable `fetch_contacts` and re-exports no other names.

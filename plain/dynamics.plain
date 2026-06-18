@@ -2,123 +2,44 @@
 import:
   - crm_common
   - integration_testing
-description: "Microsoft Dynamics 365 (Dataverse) Integration plug-in for the consolidated CRM backend. Adds src/integrations/dynamics/ so that GET /ingest/dynamics pulls Contact records from a Dynamics 365 environment via the Dataverse Web API and persists them through the host's dedup pipeline."
+description: "Dynamics 365 Integration plug-in for the consolidated CRM backend. Adds src/integrations/dynamics/ so that GET /ingest/dynamics pulls contact records from a Dynamics 365 (Dataverse) org via the Web API and persists them through the host's dedup pipeline."
 ---
 
 ***definitions***
 
 - :DynamicsProvider: is the :Provider: identifier `dynamics` - the folder name `src/integrations/dynamics/` and the value used as `provider_id` on every :IncomingContact: this integration emits.
 
-- :DynamicsCredentials: are the credentials required to authenticate against a Dynamics 365 environment using the Azure AD OAuth 2.0 client-credentials (server-to-server) flow, read from environment variables.
-  - `DYNAMICS_TENANT_ID` - the Azure AD tenant id the app registration lives in (required)
-  - `DYNAMICS_CLIENT_ID` - the app registration (application) client id (required)
-  - `DYNAMICS_CLIENT_SECRET` - the app registration client secret (required)
-  - `DYNAMICS_RESOURCE_URL` - the environment/org URL, e.g. `https://org427d9ce3.crm4.dynamics.com` (required)
+- :DynamicsIntegration: is the concrete :Integration: for :DynamicsProvider: that pulls Dynamics 365 (Dataverse) `contact` records and yields :IncomingContact: records.
 
-- :DynamicsIntegration: is the concrete :Integration: for :DynamicsProvider: that pulls Dynamics 365 `contact` records and yields :IncomingContact: records.
-  - Lives at `src/integrations/dynamics/__init__.py` and exposes a top-level callable `fetch_contacts()`.
-  - Calls the Dataverse Web API over HTTPS using the host's already-available `requests` library.
-  - Reads :DynamicsCredentials: on every call (not at import time), so missing credentials surface as a runtime error - not an import-time crash that breaks the host's discovery loop.
+- :DynamicsCredentials: are the :IntegrationCredentials: for :DynamicsProvider:, used to authenticate against a Dynamics 365 (Dataverse) org via the Azure AD OAuth 2.0 client-credentials (server-to-server) flow, read from environment variables.
+  - `DYNAMICS_ENDPOINT` - the Dataverse org base URL, e.g. `https://your-org.crm4.dynamics.com` (required)
+  - `DYNAMICS_TENANT_ID` - the Azure AD tenant id used in the token authority URL (required)
+  - `DYNAMICS_CLIENT_ID` - the Azure AD app registration client id (required)
+  - `DYNAMICS_CLIENT_SECRET` - the Azure AD app registration client secret (required)
 
-***implementation reqs***
+- :DynamicsRestAPI: is the exact Dataverse Web API surface this integration calls, defined by [resources/dynamics/openapi.yaml](resources/dynamics/openapi.yaml).
 
-- :DynamicsIntegration: reuses the host's already-installed `requests` library (pinned by the host in `requirements.txt`).
-  - It must NOT add any new dependency to `requirements.txt` and must NOT re-pin `requests` - the host already provides it.
-  - It must NOT use any Dynamics-specific or Microsoft SDK (no `msal`, no `dataverse` client); all provider calls are plain HTTPS calls via `requests`.
-
-- :DynamicsIntegration: authenticates with the Azure AD OAuth 2.0 client-credentials flow (v2 endpoint) before reading contacts.
-  - The token endpoint is `https://login.microsoftonline.com/<DYNAMICS_TENANT_ID>/oauth2/v2.0/token`.
-  - The token request is an HTTP POST with a form-encoded body of `grant_type` set to `client_credentials`, `client_id`, `client_secret`, and `scope` set to `<DYNAMICS_RESOURCE_URL>/.default`.
-  - The v2 endpoint takes `scope` (the `<resource>/.default` form), not the legacy v1 `resource` parameter.
-  - The bearer token is taken from the `access_token` field of the JSON response.
-  - The base URL for all later API calls is `<DYNAMICS_RESOURCE_URL>` directly; the token response carries no instance URL, unlike some other providers.
-  - The bearer token is sent on every Web API call as the `Authorization: Bearer <token>` header.
-  - The flow issues no refresh token; a fresh token is acquired on every `fetch_contacts()` call.
-
-- :DynamicsIntegration: reads contacts from the Dataverse Web API version `v9.2`.
-  - The query URL is `<DYNAMICS_RESOURCE_URL>/api/data/v9.2/contacts`.
-  - The `$select` query option is `contactid,fullname,firstname,lastname,emailaddress1,telephone1,mobilephone,jobtitle,department`.
-  - The parent-account name is pulled with the `$expand` query option `parentcustomerid_account($select=name)`, which the API returns as a nested object on each record when a parent account exists.
-  - Every Web API request sends the headers `Accept: application/json`, `OData-MaxVersion: 4.0`, `OData-Version: 4.0`, and `Authorization: Bearer <token>`.
-
-- :DynamicsIntegration: pages through all contacts using the Dataverse OData pagination model.
-  - The default page size is 5000 records; when more records exist than fit on a page, the response carries an `@odata.nextLink` field holding the absolute URL of the next page.
-  - The next page is fetched by issuing a GET against the `@odata.nextLink` URL exactly as given; the URL is followed verbatim and is never modified, re-encoded, or appended to (it carries an opaque `$skiptoken`).
-  - The `Accept`, `OData-MaxVersion`, `OData-Version`, and `Authorization` headers are sent on every page request.
-  - Paging stops when a response has no `@odata.nextLink` field.
-  - `$skip` is not supported by Dataverse and is never used; `$top` is never combined with paging.
-
-- :DynamicsIntegration: applies a skip-and-log batch-failure policy for malformed records (global to every functionality).
-  - Live environments can contain contacts that cannot be mapped (for example a missing `contactid`, or a contact with no name at all - on the probed org 142 of 341 contacts had `fullname`, `firstname`, and `lastname` all empty).
-  - When mapping a single contact raises a value error, that one record is skipped and a warning is logged that names the contact's `contactid`, then processing continues with the next record.
-  - A skipped record never aborts the batch; `fetch_contacts()` returns all the records that mapped successfully.
-  - Errors that are not per-record mapping failures (missing credentials, auth failure, transport/HTTP errors) are not swallowed - they propagate to the caller.
-
-- :DynamicsIntegration: validates a contact's email before emitting it as `primary_email`.
-  - The host models :IncomingContact:'s `primary_email` as an email-typed field and rejects any invalid email; a single invalid email aborts the host's whole ingest, so the integration must never emit an invalid email.
-  - Email validity is checked with the host's already-installed `email-validator` library, with deliverability / DNS checks disabled, matching how the host validates the field.
-  - An `emailaddress1` value that fails this check is emitted as `None` (the contact is still returned) and a warning is logged naming the contact's `contactid`; this is not a record-skip.
-  - `email-validator` is already provided by the host in `requirements.txt`; the integration must NOT add or re-pin it.
-
-- The integration package layout under `src/integrations/dynamics/` is:
-  - `__init__.py` - re-exports `fetch_contacts` from `client.py` (kept tiny to honour the host's discovery contract).
-  - `client.py` - reads :DynamicsCredentials:, acquires the token, requests pages, follows pagination, applies skip-and-log, and yields :IncomingContact: dicts.
-  - `mapping.py` - the pure function that converts one raw Dynamics `contact` record (dict from the Web API) into an :IncomingContact: dict.
-
-- :UnitTests: for the Dynamics integration live under `tests/integrations/dynamics/` and never make real network calls.
-  - All token acquisition and all Web API GET access go through single seams in `client.py` so :UnitTests: can monkey-patch / inject fakes without touching `requests` or the network.
-  - `mapping.py` must be tested with concrete sample Dynamics `contact` payloads stored inline in the test files as Python dicts; no external fixtures.
-  - :UnitTests: must cover the skip-and-log path: a page containing one unmappable record (a contact with no `contactid`, or with `fullname`, `firstname`, and `lastname` all empty) yields the good records and skips the bad one without raising.
-  - :UnitTests: must cover multi-page pagination: a first page carrying an `@odata.nextLink` followed by a final page with no `@odata.nextLink`, asserting records from both pages are returned.
-  - :UnitTests: must cover the invalid-email path: a contact whose `emailaddress1` is malformed (for example a `&` in the domain) maps to `primary_email` of `None` while the rest of the record maps normally, without raising.
+- :DynamicsContactMapping: is the field-by-field contract for converting one raw Dynamics 365 `contact` record into an :IncomingContact: dict, fully described in [resources/dynamics/contact-mapping.md](resources/dynamics/contact-mapping.md).
 
 ***test reqs***
 
-- :ConformanceTests: of :DynamicsIntegration: live in `conformance_tests/dynamics/` and target the live Dataverse Web API.
-  - The credential variables required from the environment are `DYNAMICS_TENANT_ID`, `DYNAMICS_CLIENT_ID`, `DYNAMICS_CLIENT_SECRET`, and `DYNAMICS_RESOURCE_URL`.
-  - These are the same variable names :DynamicsIntegration: reads at runtime.
+- :ConformanceTests: of :DynamicsContactMapping: must generate dummy Dynamics 365 `contact` records based on the `ContactRecord` schema of :DynamicsRestAPI: and map each one with :DynamicsContactMapping:.
+  - Every generated record must conform to the `ContactRecord` schema of :DynamicsRestAPI:.
+  - Each mapped result must be a valid :IncomingContact: that follows the :DynamicsContactMapping: contract.
+  - This is a pure-function check: it invokes :DynamicsContactMapping: directly on the dummy records and must not call the live API or `fetch_contacts()`.
 
 ***functional specs***
 
-- Implement :DynamicsIntegration:'s contact-to-:IncomingContact: mapping as a pure function `dynamics_contact_to_incoming(contact: dict) -> dict` in `src/integrations/dynamics/mapping.py`.
-  - Input: a dict shaped like one entry of the `value[]` array returned by the Dataverse Web API for the `contact` entity.
-  - Output: an :IncomingContact: dict with keys `provider_id`, `external_id`, `full_name`, `primary_email`, `phone`, `job_title`, `company_name`, `custom_fields`.
-  - Field mapping rules:
-    - `provider_id` is always the literal string `dynamics` (matches :DynamicsProvider:).
-    - `external_id` is the `contactid` field (required - raise `ValueError` if missing or empty).
-    - `full_name` is the `fullname` field when present and non-empty, with surrounding whitespace stripped.
-      - Otherwise it is `firstname` and `lastname` joined by a single space, each treated as empty when null, with surrounding whitespace stripped.
-      - Otherwise raise `ValueError` because :IncomingContact: requires a non-empty `full_name`.
-    - `primary_email` is the `emailaddress1` field, lowercased and trimmed, but only when it is a valid email address; otherwise `None`.
-      - A missing or empty `emailaddress1` maps to `None`.
-      - A non-empty `emailaddress1` that is not a valid email address also maps to `None` so the contact still maps; a warning is logged naming the contact's `contactid`.
-      - Email validity is judged the same way the host judges it (see the implementation reqs), so any value emitted here is always accepted by the host's :IncomingContact: contract.
-    - `phone` is the `telephone1` field when present and non-empty; otherwise the `mobilephone` field; otherwise `None`.
-    - `job_title` is the `jobtitle` field, or `None` when missing or empty.
-    - `company_name` is the `name` value of the nested `parentcustomerid_account` object, or `None` when that object is missing, null, or has no non-empty name.
-  - `custom_fields` captures every field on the input dict that is not consumed above and is not API metadata.
-    - Consumed keys are `contactid`, `fullname`, `firstname`, `lastname`, `emailaddress1`, `telephone1`, `mobilephone`, `jobtitle`, and `parentcustomerid_account`.
-    - API metadata is any key beginning with `@odata` (for example `@odata.etag`); these are never copied.
-    - The nested `parentcustomerid_account` object is treated as consumed and is not copied into `custom_fields`.
-    - The remaining keys (for example `department`) are copied verbatim into a new dict.
+- Implement a function that implements :DynamicsContactMapping: as a pure function within the integration package.
 
-- Implement :DynamicsIntegration:'s client wrapper in `src/integrations/dynamics/client.py`.
-  - It exposes one top-level callable `fetch_contacts()` that returns a list of :IncomingContact: dicts.
-  - On each call:
-    - Read :DynamicsCredentials: from environment variables. If any required variable is missing or empty, raise `RuntimeError` with a message naming the missing variable.
-    - Acquire a bearer token via the Azure AD OAuth client-credentials flow described in the implementation reqs.
-    - Request the first page of contacts from the `contacts` resource with the `$select`, `$expand`, and headers described in the implementation reqs.
-    - Follow `@odata.nextLink` verbatim to read every subsequent page until a response has no `@odata.nextLink`.
-    - For each record across all pages, map it with `dynamics_contact_to_incoming` from `mapping.py`.
-      - If mapping one record raises `ValueError`, skip that record and log a warning naming its `contactid`, then continue.
-    - Return the list of successfully mapped :IncomingContact: dicts.
-  - Token acquisition and each Web API GET must each be reachable through one indirection point.
-    - A module-level `_acquire_token(creds)` returns the bearer token string.
-    - A module-level `_get_json(url, token)` performs one Web API GET and returns the parsed JSON body.
-    - These seams let :UnitTests: monkey-patch them without touching the real `requests` library.
+- Implement :DynamicsIntegration:'s `fetch_contacts()` entry point.
+  - Read :DynamicsCredentials: from environment variables. If any required variable is missing or empty, raise `RuntimeError` with a message naming the missing environment variable key (e.g. `DYNAMICS_ENDPOINT`).
+  - Acquire a bearer token via the OAuth client-credentials flow of :DynamicsRestAPI:, using the org base URL plus `/.default` as the scope.
+  - Request the first page of contacts from the query endpoint of :DynamicsRestAPI: with its pinned query options and headers.
+  - Read every subsequent page per the pagination envelope of :DynamicsRestAPI: until all pages are read.
+  - For each record across all pages, map it with :DynamicsContactMapping:.
+    - If mapping one record raises `ValueError`, skip that record and log a warning naming its `contactid`, then continue.
+  - Return the list of successfully mapped :IncomingContact: dicts.
 
 - Wire :DynamicsIntegration: into the host's runtime discovery surface.
-  - `src/integrations/dynamics/__init__.py` re-exports `fetch_contacts` from `client.py`.
-    - The file consists of one line: `from src.integrations.dynamics.client import fetch_contacts`.
-  - No new dependency is added to `requirements.txt` - the integration uses the host's existing `requests` library.
-  - The host's existing `GET /ingest/{integration}` endpoint discovers the integration by the name `dynamics` and invokes `fetch_contacts()` per the host's contract - no host-side code changes are required.
+  - `src/integrations/dynamics/__init__.py` exports only the top-level callable `fetch_contacts` and re-exports no other names.

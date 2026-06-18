@@ -1,57 +1,49 @@
 import os
-import requests
-from typing import Any, Dict, Iterable, List
-from .mapping import close_contact_to_incoming
+import httpx
+from typing import Generator, Dict, Any, List
 
-def _get_credentials() -> tuple[str, str]:
-    """Reads Close credentials from environment variables."""
-    api_key = os.environ.get("CLOSE_API_KEY")
-    if not api_key:
-        raise RuntimeError("Missing required environment variable: CLOSE_API_KEY")
-    
-    base_url = os.environ.get("CLOSE_API_BASE", "https://api.close.com/api/v1")
-    return api_key, base_url.rstrip("/")
-
-def _get(url: str, api_key: str, params: dict) -> dict:
-    """Performs a GET request to the Close API with Basic Auth."""
-    response = requests.get(
-        url,
-        auth=(api_key, ""),
-        params=params,
-        timeout=30
-    )
-    if not (200 <= response.status_code < 300):
-        raise RuntimeError(
-            f"Close API request failed with status {response.status_code}. "
-            f"URL: {url}, Response: {response.text}"
-        )
-    return response.json()
-
-def fetch_contacts() -> List[Dict[str, Any]]:
+class CloseClient:
     """
-    Discovers and returns all contacts from Close.com.
+    Minimal client for the Close REST API surface defined in openapi.yaml.
     """
-    api_key, base_url = _get_credentials()
-    contacts_url = f"{base_url}/contact/"
-    
-    all_contacts = []
-    skip = 0
-    limit = 100
-    has_more = True
-    
-    while has_more:
-        params = {"_skip": skip, "_limit": limit}
-        page_data = _get(contacts_url, api_key, params)
+    BASE_URL = "https://api.close.com/api/v1"
+
+    def __init__(self):
+        api_key = os.environ.get("CLOSE_API_KEY")
+        if not api_key:
+            raise RuntimeError("CLOSE_API_KEY")
         
-        data = page_data.get("data", [])
-        if not data:
-            break
-            
-        for record in data:
-            all_contacts.append(close_contact_to_incoming(record))
-            
-        has_more = page_data.get("has_more", False)
-        if has_more:
-            skip += len(data)
-            
-    return all_contacts
+        # Basic Auth: API Key as username, blank password
+        self.auth = (api_key, "")
+        self.limit = 100
+
+    def list_contacts(self) -> Generator[Dict[str, Any], None, None]:
+        """
+        Iterates through all contacts using pagination.
+        """
+        skip = 0
+        has_more = True
+
+        with httpx.Client(base_url=self.BASE_URL, auth=self.auth) as client:
+            while has_more:
+                params = {
+                    "_limit": self.limit,
+                    "_skip": skip
+                }
+                response = client.get("/contact/", params=params)
+                
+                if response.status_code == 401:
+                    raise RuntimeError("Close API authentication failed (401)")
+                response.raise_for_status()
+                
+                data = response.json()
+                records = data.get("data", [])
+                for record in records:
+                    yield record
+                
+                has_more = data.get("has_more", False)
+                skip += len(records)
+                
+                # Safety break if no records returned but has_more is true
+                if not records and has_more:
+                    break

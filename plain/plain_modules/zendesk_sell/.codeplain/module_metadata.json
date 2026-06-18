@@ -1,0 +1,8 @@
+{
+    "source_hash": "570138aee525955b9120246abe45c0333868f0b3e69214a483e2c64c79e91d6c",
+    "functionalities": [
+        "- Implement a function that implements :ZendeskSellContactMapping: as a pure function within the integration package.\n  - The input is the `data` object of one entry of the `items` array of a :ZendeskSellRestAPI: list response.",
+        "- Implement :ZendeskSellIntegration:'s `fetch_contacts()` entry point.\n  - Read :ZendeskSellCredentials: from environment variables. If any required variable is missing or empty, raise `RuntimeError` with a message naming the missing environment variable key (e.g. `ZENDESK_SELL_ACCESS_TOKEN`).\n  - Request the first page of contacts from the contacts list endpoint of :ZendeskSellRestAPI: with its pinned page size and the required headers (the Bearer authorization header, the Accept header, and a descriptive User-Agent header) of :ZendeskSellRestAPI:.\n  - Read every subsequent page per the pagination envelope of :ZendeskSellRestAPI: until all pages are read.\n  - For each entry across all pages, map its `data` object with :ZendeskSellContactMapping:.\n    - If mapping one record raises `ValueError`, skip that record and log a warning naming its `id`, then continue.\n  - Return the list of successfully mapped :IncomingContact: dicts.",
+        "- Wire :ZendeskSellIntegration: into the host's runtime discovery surface.\n  - `src/integrations/zendesk_sell/__init__.py` exports only the top-level callable `fetch_contacts` and re-exports no other names."
+    ]
+}
