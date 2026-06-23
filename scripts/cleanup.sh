@@ -12,20 +12,19 @@ INTEGRATION=$1
 # Move to the project root directory so this script can be run from anywhere
 cd "$(dirname "$0")/.." || exit 1
 
-if [ ! -f "plain/${INTEGRATION}.plain" ] && [ ! -d "src/integrations/${INTEGRATION}" ]; then
-    echo "Error: Integration '${INTEGRATION}' does not exist (no .plain file or src directory found)."
+MATCHES=$(find . -name "*${INTEGRATION}*" ! -path "*/.git/*")
+if [ -z "$MATCHES" ]; then
+    echo "Error: No files or folders found containing '${INTEGRATION}'."
     exit 1
 fi
 
 echo "Removing crm.db..."
 rm -f crm.db
 
-echo "Removing specs and resources for '${INTEGRATION}'..."
-rm -f "plain/${INTEGRATION}.plain"
-rm -rf "plain/resources/${INTEGRATION}"
+echo "Deleting files and folders containing '${INTEGRATION}'..."
+find . -depth -name "*${INTEGRATION}*" ! -path "*/.git/*" -exec rm -rf {} \;
 
-echo "Cleaning up generated integration directories for '${INTEGRATION}'..."
-rm -rf "src/integrations/${INTEGRATION}"
-rm -rf "tests/integrations/${INTEGRATION}"
+echo "Removing any directories left empty..."
+find . -depth -type d -empty ! -path "*/.git/*" -delete
 
 echo "Cleanup complete for '${INTEGRATION}'!"
