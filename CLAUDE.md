@@ -9,12 +9,25 @@ The authoritative authoring rules live in `.claude/rules/`. **Read them and obey
 file does not restate them. It captures only the hard-won lessons the rules alone did not prevent,
 and points back to the rule that governs each one.
 
-## Always load the ***plain reference first
+## The reference and host context are auto-loaded into context
 
-**At the start of every session, before doing anything else in this project, invoke the
-`/load-plain-reference` skill** to pull the full ***plain language reference (PLAIN_REFERENCE.md) into
-context. This is mandatory — do it once per session before authoring, editing, reviewing, or debugging
-any `.plain` content, and before invoking any other plain-forge skill.
+The bulk authoring context is loaded **uncapped via CLAUDE.md `@imports`** (see *Auto-loaded startup
+context* at the end of this file): the full ***plain language reference, the `salesforce.plain`
+structural exemplar, the `crm_common` + `integration_testing` templates, the host's `schemas.py` /
+`ingest.py` / `requirements.txt`, `plain/config.yaml`, and the salesforce `openapi.yaml` +
+`contact-mapping.md`. The imports expand the **live** files every session, so they never drift.
+
+A small `SessionStart` hook (`.claude/hooks/load-integration-context.sh`) adds only the **dynamic**
+piece the imports can't express: the current list of existing integrations, so you don't duplicate a
+provider. (History: the hook used to dump everything, but Claude Code caps each hook output at
+~10K chars and persists the overflow to a file instead of injecting it — so the heavy, static content
+moved to `@imports`, which are uncapped.)
+
+Because of this, **do not invoke `/load-plain-reference`** and **do not perform manual host discovery**
+(reading those exemplar/template/host files to learn the stack) — that context is already in your
+window. Host facts remain deductions, not questions. The provider-specific live-API cross-check
+(`integrations.md` § *Live API must be cross-checked*) is **not** covered by this and still must be
+done per integration.
 
 ## Skills to refrain from using
 
@@ -334,3 +347,21 @@ dirty data, and put all cross-cutting behavior in implementation reqs.
   SDK, hits the live API, or sees dirty data, so neither can catch any of the three incidents above. A
   green dry-run does **not** mean a safe render.
 - Run `analyze-func-specs` across the new specs to surface conflicts before rendering.
+
+## Auto-loaded startup context (`@imports` — do not remove)
+
+These `@`-imports load the full authoring context into every session, **uncapped** — the ~10K-char
+SessionStart-hook output limit does **not** apply to CLAUDE.md imports. They expand the **live** files
+at launch, so the context never drifts from source. The dynamic existing-integrations list is added
+separately by `.claude/hooks/load-integration-context.sh`. Paths are relative to this file (repo root).
+
+@.claude/skills/load-plain-reference/SKILL.md
+@plain/salesforce.plain
+@plain/template/crm_common.plain
+@plain/template/integration_testing.plain
+@src/models/schemas.py
+@src/services/ingest.py
+@requirements.txt
+@plain/config.yaml
+@plain/resources/salesforce/openapi.yaml
+@plain/resources/salesforce/contact-mapping.md
