@@ -68,14 +68,75 @@ continuation line** — any line inside a section that does not start with `- ` 
 `line-length.md` § *Never use bare continuation lines*). Avoid those at all costs; the 120-char count
 itself is cosmetic.
 
-## Ask the user before authoring — at least 3-5 questions, one at a time
+## First step: create the empty `.plain` module with its frontmatter
 
-When building a new integration, **always ask the user at least 3-5 questions** before authoring the
-specs. Ask them **one by one** — never batch them into a single multi-question prompt — so each
-answer can inform the next question. Focus the questions on what the codebase cannot tell you: the
-provider and its API, authentication and credentials, edge cases, and the batch failure policy for
-dirty data. Everything the host already encodes is a deduction, not a question
-(`integration-embedded.md` § *Discover before you ask*).
+When a user asks to create a new integration, the **very first action** — before any questions, host
+discovery narration, or resource authoring — is to create the empty root `.plain` module at
+`plain/<provider>.plain` containing **only** the YAML frontmatter (no spec sections yet). Mirror the
+salesforce frontmatter exactly, but the `description` must be **integration-specific** (the provider,
+its `src/integrations/<provider>/` plug-in, the `GET /ingest/<provider>` route, and what it pulls from
+the provider's API). Template:
+
+```yaml
+---
+import:
+  - crm_common
+  - integration_testing
+description: "<Provider> Integration plug-in for the consolidated CRM backend. Adds src/integrations/<provider>/ so that GET /ingest/<provider> pulls Contact records from <provider> via its REST API and persists them through the host's dedup pipeline."
+---
+```
+
+Creating the file first gives every subsequent step (questions, OpenAPI, mapping doc, spec sections) a
+concrete target to write into. The sections are then filled in as authoring proceeds.
+
+## The authoring workflow is a strict 4-phase sequence — Phase 1 is an ask→answer→**write** loop
+
+When building a new integration, follow these four phases **in order**. The single most important —
+and most often dropped — rule is the **write step inside the Phase 1 loop**: it is a precondition for
+asking the next question, **not** a drafting phase you do after the interview. (Why it gets dropped:
+it fights the model's natural "gather everything, then write once" default and has no built-in gate.
+A `UserPromptSubmit` hook — `.claude/hooks/enforce-incremental-authoring.sh` — now reinjects this
+reminder on every turn while a `plain/*.plain` module is still missing a required section, restoring
+the per-turn checkpoint. The prose below is the rule; the hook is the forcing function.)
+
+### Phase 1 — the question loop (repeat 3-5 times)
+
+Ask **at least 3-5 questions**, and run each one through this exact loop:
+
+1. **Ask exactly one question.** Never batch questions into a single multi-question prompt — each
+   answer should inform the next question. Focus questions on what the codebase cannot tell you: the
+   provider and its API, authentication and credentials, edge cases, and the batch failure policy for
+   dirty data. Everything the host already encodes is a deduction, not a question
+   (`integration-embedded.md` § *Discover before you ask*).
+2. **Wait for the user's answer.**
+3. **Write that answer into the specs — immediately, before step 4.** Fold the answer into the
+   `.plain` module (and its linked resources) with a small `Edit`, using your best effort. An
+   imperfect first pass is fine; you will refine it as later answers arrive. This write is mandatory
+   on every iteration — do **not** proceed to the next question with an unwritten answer.
+4. **Loop back to step 1** for the next question.
+
+By the time the last question is answered, the spec is already **substantially complete** because every
+answer was written down as it arrived. Incremental writing keeps each answer fresh, surfaces gaps (a
+missing field, an undecided policy) as the *next* question, and prevents the long silent drafting phase
+that loses detail.
+
+### Phase 2 — ground against the live API
+
+Once the question loop is done: `fetch` the provider docs, run web searches, and live-probe the API
+(auth, list/retrieve, pagination, boundary/dirty-data hunt) per `integrations.md` § *Live API must be
+cross-checked*. Author the OpenAPI file first, from this cross-check.
+
+### Phase 3 — reconcile
+
+Correct the specs for everything the grounding surfaced: docs-vs-live discrepancies, SDK API surface,
+dirty-data findings and the chosen batch policy, the host-validated fields. Prefer **many small edits
+over a few big ones** — write each concrete fact (an endpoint URL, an auth field, a pagination marker,
+a single OpenAPI field) the moment you learn it, in its own small edit.
+
+### Phase 4 — review
+
+Review the written specs end-to-end, then run the pre-launch checks and `plain-healthcheck` per the
+rest of this file before rendering.
 
 ## North star: render green on the FIRST `codeplain` run
 

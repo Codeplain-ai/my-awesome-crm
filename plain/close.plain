@@ -39,4 +39,6 @@ description: "Close Integration plug-in for the consolidated CRM backend. Adds s
   - Return the list of successfully mapped :IncomingContact: dicts.
 
 - Wire :CloseIntegration: into the host's runtime discovery surface.
-  - `src/integrations/close/__init__.py` exports only the top-level callable `fetch_contacts` and re-exports no other names.
+  - `src/integrations/close/__init__.py` exposes the top-level callable `fetch_contacts` as the package's public entry point.
+    - The package's public API is declared as exactly `fetch_contacts`, for example through `__all__`.
+    - Internal helper modules (such as a mapping module) are implementation details; `__init__.py` may import them, and they need not be removed from the package namespace.
