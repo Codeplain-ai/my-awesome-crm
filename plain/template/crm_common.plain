@@ -1,5 +1,5 @@
 ---
-description: Shared concepts and tech-stack implementation reqs for the consolidated CRM project and any integration module that builds on it. Carries no functional specs.
+description: Shared concepts and tech-stack implementation reqs for the CRM host (a generic record store) and any integration module that builds on it. Carries no functional specs.
 ---
 
 ***definitions***
@@ -8,46 +8,36 @@ description: Shared concepts and tech-stack implementation reqs for the consolid
   - Each :Provider: has a stable string identifier (e.g. "salesforce", "pipedrive").
   - The identifier is opaque to the host backend - concrete providers are added by integration modules.
 
-- :SourceLink: records a one-way link from a consolidated person record to a single :Provider:.
-  - provider_id - the stable :Provider: identifier string (required)
-  - external_id - the record's id in the :Provider: system (required, opaque string)
-  - last_synced_at - timestamp of the last successful pull from this :Provider: for this link (required)
-
-- :IncomingContact: is the normalized record an integration plug-in emits for each external person it sees.
-  - provider_id - the :Provider: identifier (required, must match the integration folder name)
-  - external_id - the record's id in the source :Provider: (required)
-  - full_name - human-readable display name (required, non-empty)
-  - primary_email - canonical email (optional)
-  - phone - free-form phone string (optional)
-  - job_title - free-form job title (optional)
-  - company_name - free-form company name (optional)
-  - custom_fields - free-form JSON object for fields that don't fit the unified schema (optional, defaults to empty object)
-
-- :Contact: is a consolidated person record sourced from one or more :Provider: systems.
-  - It is the unit of consolidation - one logical person across multiple :Provider: systems is represented by one :Contact:.
-  - id - opaque server-generated identifier, stable for the lifetime of the record (required)
-  - full_name - human-readable display name (required, non-empty)
-  - primary_email - canonical email address, lowercased (optional, must be a valid email when present)
-  - phone - free-form phone string, no normalization (optional)
-  - job_title - free-form job title (optional)
-  - company_name - free-form company name as a plain string (optional)
-  - source_links - list of :SourceLink: entries, one per :Provider: this record was sourced from (required, may be empty)
-  - custom_fields - free-form JSON object for provider-specific extras that do not fit the unified schema (required, defaults to empty object)
+- :Record: is one row in the host's generic store.
+  - The store is deliberately untyped - it holds records of any kind, distinguished only by their data_type.
+  - id - opaque server-generated identifier, stable for the lifetime of the row (required, set by the host backend)
+  - data_type - a string naming the kind of record this row holds, e.g. "contact" (required)
+  - source - the :Provider: identifier of the integration that produced the row (required)
+  - data - the record payload as a free-form JSON object; the host stores it verbatim and never validates its shape (required)
   - created_at - timestamp of first creation (required, set by the host backend)
   - updated_at - timestamp of last modification (required, set by the host backend)
 
-- :Integration: is a runtime-discovered plug-in that pulls :IncomingContact: records out of a particular :Provider:.
-  - One :Integration: corresponds to one :Provider: identifier.
+- :Contact: is the conventional shape of the `data` payload for a :Record: whose data_type is "contact".
+  - It is a plain JSON object - not a host-validated model; the host stores it verbatim, so these fields are a convention integrations follow, not a contract the host enforces.
+  - provider_id - the :Provider: identifier the contact came from (conventional)
+  - external_id - the record's id in the source :Provider: (conventional)
+  - full_name - human-readable display name (conventional)
+  - primary_email - canonical email address (conventional)
+  - phone - free-form phone string (conventional)
+  - job_title - free-form job title (conventional)
+  - company_name - free-form company name (conventional)
+  - custom_fields - free-form JSON object for fields that do not fit the shape above (conventional, defaults to empty object)
+
+- :Integration: is a runtime-discovered plug-in that pulls records out of a particular :Provider:.
+  - One :Integration: corresponds to one :Provider: identifier, which is recorded as the `source` of every :Record: it produces.
   - The host logic that discovers integrations and invokes them in the ingest workflow is [ingest.py](../src/services/ingest.py) - imported from the host codebase; do not redefine or modify it.
   - Integrations are discovered from the filesystem at runtime - the :Integration: named "foo" lives in `src/integrations/foo/` and may consist of multiple files inside that folder.
-  - Plug-in contract - the integration package `src/integrations/{name}/__init__.py` must expose a top-level callable `fetch_contacts()`.
-    - `fetch_contacts()` takes no arguments and returns an iterable of :IncomingContact: records.
+  - An :Integration: declares the kind of record it produces via a module-level `DATA_TYPE` string (e.g. "contact").
+  - Plug-in contract - the integration package `src/integrations/{name}/__init__.py` must expose the module-level `DATA_TYPE` and a top-level callable `fetch(get_stored)`.
+    - `get_stored` is a callback the host passes in; calling `get_stored(data_type)` returns every :Record: already stored for that data_type, regardless of source.
+    - `fetch(get_stored)` returns a list of dicts; the host stores each verbatim as the `data` of a :Record: row under the integration's `DATA_TYPE` and `source`.
+    - On each run the host first removes the integration's previously-stored rows, then inserts its fresh output, so re-syncing is idempotent.
     - If the callable is missing or raises, the host treats the integration as failed for that ingest call - no partial writes are committed.
-
-- :DedupKey: is the deterministic key the host uses to decide whether an :IncomingContact: maps to an existing :Contact: or creates a new one.
-  - If the :IncomingContact: has a non-empty email, the :DedupKey: is the lowercased, trimmed email.
-  - Otherwise the :DedupKey: is the string `name:<lowercased trimmed full_name>|phone:<digits-only phone>`.
-  - Records where the fallback key cannot be built (no email, and either full_name or phone missing) are never auto-merged - they always become a new :Contact:.
 
 ***implementation reqs***
 
@@ -65,14 +55,14 @@ description: Shared concepts and tech-stack implementation reqs for the consolid
   - The FastAPI application object is exposed at `src/main.py:app` so it can be run with `uvicorn src.main:app`.
 
 - :Implementation: should use SQLModel for ORM models and database session management against SQLite.
-  - One SQLModel class per persisted entity (:Contact:, :SourceLink:).
+  - The generic store is a single SQLModel `table=True` class for :Record:.
   - SQLite is accessed through SQLModel's engine; SQLite foreign keys are enabled on every connection.
-  - Every column field on a SQLModel `table=True` class must carry an explicit Python type annotation alongside its `Field(...)` default - SQLModel on Pydantic v2 raises `PydanticUserError: Field '<name>' requires a type annotation` when a field has no annotation. Use forms like `id: int | None = Field(default=None, primary_key=True)`, `contact_id: int = Field(foreign_key="contact.id", index=True)`, `created_at: datetime = Field(default_factory=datetime.utcnow)`. Never write `id = Field(...)` without an annotation.
-  - JSON columns (e.g. `custom_fields` on :Contact:) are declared with a typed Python container annotation and a `Field(sa_column=Column(JSON), default_factory=dict)` mapping; the model attribute is typed as `dict[str, Any]`.
+  - Every column field on a SQLModel `table=True` class must carry an explicit Python type annotation alongside its `Field(...)` default - SQLModel on Pydantic v2 raises `PydanticUserError: Field '<name>' requires a type annotation` when a field has no annotation. Use forms like `id: int | None = Field(default=None, primary_key=True)`, `data_type: str = Field(index=True)`, `created_at: datetime = Field(default_factory=datetime.utcnow)`. Never write `id = Field(...)` without an annotation.
+  - The `data` JSON column on :Record: is declared with a typed Python container annotation and a `Field(sa_column=Column(JSON), default_factory=dict)` mapping; the model attribute is typed as `dict[str, Any]`.
 
 - :Implementation: should use Alembic for schema migrations.
   - Alembic config lives at the repository root (`alembic.ini`) with the migrations directory at `alembic/`.
-  - On startup, the host runs `alembic upgrade head` programmatically before serving requests, so the schema is always at the latest revision.
+  - On startup, the host ensures the schema exists before serving requests.
 
 - :Implementation: should use Pydantic v2 models (separate from the SQLModel persistence models) for request and response schemas exposed by the HTTP API.
   - Persistence models are not returned directly from the API; they are converted to response models first.
@@ -80,34 +70,31 @@ description: Shared concepts and tech-stack implementation reqs for the consolid
 - :Implementation: should use Python's standard `logging` module configured at startup with a JSON formatter and `INFO` as the default level.
 
 - :Implementation: source code is laid out under `src/` with one subpackage per layer.
-  - `src/main.py` - FastAPI application factory, startup hooks (logging config, Alembic upgrade, integration-discovery wiring), Uvicorn entry point.
-  - `src/api/` - FastAPI routers. One router file per resource (`contacts.py`, `ingest.py`, `health.py`). Routers are thin - they parse input, call a service, format the response.
-  - `src/services/` - business logic. `dedup.py` (computes :DedupKey: and runs the merge rule), `ingest.py` (orchestrates :Integration: discovery + iteration + persistence), `contacts.py` (list/search/get).
-  - `src/repositories/` - SQLModel queries. One file per persisted entity (`contact_repo.py`, `source_link_repo.py`). Repositories return SQLModel instances; only services convert to/from Pydantic schemas.
-  - `src/models/` - persistence and API models. `db.py` (SQLModel persisted classes), `schemas.py` (Pydantic request/response schemas).
+  - `src/main.py` - FastAPI application factory, startup hooks (logging config, schema creation, integration-discovery wiring), Uvicorn entry point.
+  - `src/api/` - FastAPI routers. One router file per resource (`records.py`, `ingest.py`, `health.py`). Routers are thin - they parse input, call a service or repository, format the response.
+  - `src/services/` - business logic. `ingest.py` orchestrates :Integration: discovery, invocation, and persistence of the returned :Record: rows.
+  - `src/repositories/` - SQLModel queries. `record_repo.py` reads and writes :Record: rows. Repositories return SQLModel instances; only services/routers convert to/from Pydantic schemas.
+  - `src/models/` - persistence and API models. `db.py` (the :Record: SQLModel class), `schemas.py` (Pydantic request/response schemas).
   - `src/integrations/` - root for runtime-discovered :Integration: plug-ins. Each integration is a Python package at `src/integrations/<name>/`.
-  - `src/auth.py` - the `X-API-Key` dependency used by every authed router.
   - `src/db.py` - the SQLModel engine + session factory.
-  - `src/config.py` - configuration loaded from environment variables (`CRM_API_KEY`, `CRM_DB_PATH`, `CRM_PORT`).
+  - `src/config.py` - configuration loaded from environment variables (`CRM_DB_PATH`, `CRM_PORT`).
+  - The host backend is unauthenticated; the only credentials in play are the per-:Provider: ones each :Integration: reads from the environment when it runs.
 
-- Every :Integration: applies a skip-and-log batch-failure policy for malformed records (global to every functionality of every integration module).
-  - Live :Provider: systems can contain records that cannot be mapped to an :IncomingContact: (for example a missing or empty provider-side record id, or no usable name).
-  - When mapping a single record raises a value error, that one record is skipped and a warning is logged that names the record's provider-side id, then processing continues with the next record.
-  - A skipped record never aborts the batch; `fetch_contacts()` returns all the records that mapped successfully.
-  - Errors that are not per-record mapping failures (missing credentials, auth failure, transport/HTTP errors) are not swallowed - they propagate to the caller.
+- The host stores whatever an :Integration: returns verbatim - there is no host-side validation, deduplication, or merging of records.
+  - Pulling records from a :Provider: either succeeds and returns a complete batch, or fails as a whole.
+  - Errors acquiring data (missing credentials, authentication failure, transport/HTTP errors) propagate to the caller; the host commits no partial writes when `fetch(get_stored)` raises.
 
 - Every :Integration: lives at `src/integrations/<id>/` with its :UnitTests: at `tests/integrations/<id>/`, keyed by its unique :Provider: identifier `<id>`.
   - Each integration module defines exactly one :Provider: identifier; it is unique across all integrations.
-  - The only file contract is that `src/integrations/<id>/__init__.py` exports a top-level callable `fetch_contacts()`.
-  - `fetch_contacts()` returns a list of dicts, each a valid :IncomingContact:, which the host's dedup pipeline transforms into :Contact: records.
+  - The only file contract is that `src/integrations/<id>/__init__.py` exports a module-level `DATA_TYPE` string and a top-level callable `fetch(get_stored)`.
+  - `fetch(get_stored)` returns a list of dicts, each stored verbatim by the host as the `data` of a :Record: row.
   - Any further internal organization of the package (helper modules, file names, how functions are split) is optional and left to each integration.
 
 - :UnitTests: of every :Integration: never make real network calls.
   - All credential/token acquisition and all provider HTTP access go through single indirection seams so :UnitTests: can monkey-patch / inject fakes without touching the HTTP library or the network.
   - The integration's mapping function must be tested with concrete sample provider payloads stored inline in the test files as Python dicts; no external fixtures.
-  - :UnitTests: must cover the skip-and-log path: a page containing one unmappable record yields the good records and skips the bad one without raising.
+  - :UnitTests: must cover the `fetch(get_stored)` entry point: given a stubbed provider response and a `get_stored` callback, it returns the mapped record `data` dicts.
   - :UnitTests: must cover multi-page pagination: a first page carrying the provider's continuation marker followed by a final page without one, asserting records from both pages are returned.
-  - :UnitTests: must cover the invalid-email path: a record whose email value is malformed maps to `primary_email` of `None` while the rest of the record maps normally, without raising.
 
 - :UnitTests: should be implemented using pytest.
   - :UnitTests: source files live under `tests/` at the repository root, mirroring the `src/` layout - `tests/api/`, `tests/services/`, `tests/repositories/`, `tests/integrations/`.
