@@ -1,0 +1,90 @@
+---
+name: add-test-requirement
+description: >-
+  Add a test requirement to the ***test reqs*** section of a ***plain spec
+  file. Use when the user wants to specify conformance testing instructions
+  like test frameworks, execution methods, or testing constraints in a .plain
+  file.
+---
+
+# Add Test Requirement
+
+Always use the skill `load-plain-reference` to retrieve the ***plain syntax rules — but only if you haven't done so yet.
+
+## Workflow
+
+1. **Identify the target `.plain` file.** If ambiguous, ask the user.
+2. **Read the file** to understand existing test reqs and the overall spec structure.
+3. **Confirm this is a conformance test concern** — unit test guidance goes in `***implementation reqs***`, not here.
+4. **Draft the requirement** following the rules below.
+5. **Insert it** into the `***test reqs***` section.
+6. **Read the file again** to confirm correct placement and syntax.
+
+## What Belongs Here
+
+Test reqs specify how **conformance tests** should be written and run. Common contents:
+
+- **Test framework**: which framework to use (e.g., pytest, Unittest, xUnit)
+- **Execution method**: the command to run the tests
+- **Testing constraints**: what must or must not be done in tests (e.g., no skipping tests, mock requirements)
+- **Test data**: how test fixtures or mock data should be structured
+- **Environment setup**: any prerequisites for running conformance tests
+
+## What Does NOT Belong Here
+
+- **Unit test guidance** — that goes in `***implementation reqs***`
+- **Acceptance tests** — those are nested under individual functional specs in `***functional specs***`
+- **Behavioral requirements** — those go in `***functional specs***`
+- **Technology choices for the implementation** — those go in `***implementation reqs***`
+
+## Conformance Tests vs Other Tests
+
+| Test Type | Where to Specify | Purpose |
+|-----------|-----------------|---------|
+| Unit tests | `***implementation reqs***` | Test individual functionalities in isolation |
+| Conformance tests | `***test reqs***` | Verify implementation conforms to the full spec |
+| Acceptance tests | `***acceptance tests***` under a functional spec | Verify a specific functional spec |
+
+## Format
+
+Test reqs are bullet points in the `***test reqs***` section:
+
+```plain
+***test reqs***
+- :ConformanceTests: should be implemented using pytest framework.
+- :ConformanceTests: will be run using "pytest" command.
+- :ConformanceTests: must be implemented and executed - do not skip tests.
+- :ConformanceTests: should mock all external HTTP calls.
+```
+
+Reference predefined concepts like `:ConformanceTests:` and any defined `:Concepts:` where they add clarity.
+
+## Line syntax (hard rule)
+
+**Every line inside `***test reqs***` must be its own list item starting with `- `.** ***plain has no concept of bare continuation lines — indented prose without a leading `- ` is **invalid syntax** and the renderer will reject it.
+
+- Hard limit: 120 characters per line. If a sentence is too long, **split it at a natural clause boundary into nested `- ` bullets** — never wrap onto an unprefixed line.
+- Nested clarifications are also `- ` items, indented under the parent. The indentation alone is not enough; the leading `- ` is required.
+
+BAD — bare continuation lines (invalid ***plain syntax, will not render):
+
+```plain
+- :ConformanceTests: must mock all external HTTP calls so that the
+  test suite remains hermetic and does not depend on network access.
+```
+
+GOOD — every line starts with `- `:
+
+```plain
+- :ConformanceTests: must mock all external HTTP calls.
+  - The test suite must remain hermetic.
+  - Tests must not depend on network access.
+```
+
+## Validation Checklist
+
+- [ ] Describes conformance testing concerns, not unit tests or behavior
+- [ ] All referenced `:Concepts:` are defined (or are predefined like `:ConformanceTests:`)
+- [ ] Does not duplicate guidance already present in the file or its imports
+- [ ] Placed inside a `***test reqs***` section
+- [ ] No behavioral requirements that should be in `***functional specs***`
