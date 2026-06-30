@@ -44,7 +44,7 @@
     header { padding: 24px 32px; border-bottom: 1px solid var(--line); text-align: center; }
     h1 { margin: 0; font-size: 22px; }
     .tagline { margin: 4px 0 0; color: var(--muted); font-weight: 400; font-size: 14px; }
-    main { max-width: 960px; margin: 0 auto; padding: 24px 32px; }
+    main { max-width: 1280px; margin: 0 auto; padding: 24px 32px; }
     section { margin-bottom: 32px; }
     h2 {
       display: flex; align-items: center; gap: 12px;
@@ -81,11 +81,22 @@
     .count.zero { color: var(--muted); }
     table { width: 100%; border-collapse: collapse; margin-top: 12px; }
     th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--line); font-size: 14px; }
+    td { vertical-align: top; }
+    td .cell {
+      max-width: 220px; overflow-x: auto; white-space: nowrap;
+    }
+    td .cell::-webkit-scrollbar { height: 6px; }
+    td .cell::-webkit-scrollbar-thumb { background: var(--line); border-radius: 3px; }
     th { color: var(--muted); font-weight: 600; }
     .sources span {
       display: inline-block; background: var(--panel); border: 1px solid var(--line);
       border-radius: 999px; padding: 1px 8px; font-size: 12px; margin: 1px 2px; color: var(--accent);
     }
+    .custom span {
+      display: inline-block; background: var(--panel); border: 1px solid var(--line);
+      border-radius: 999px; padding: 1px 8px; font-size: 12px; margin: 1px 2px; color: var(--muted);
+    }
+    .custom span b { color: var(--text); font-weight: 600; }
     .empty { color: var(--muted); font-style: italic; padding: 16px 0; }
   </style>
 </head>
@@ -196,15 +207,23 @@
       const rows = items.map((c) => {
         const sources = (c.source_links || [])
           .map((s) => `<span>${s.provider_id}</span>`).join("");
+        const custom = Object.entries(c.custom_fields || {})
+          .map(([k, v]) => `<span><b>${esc(k)}:</b> ${esc(v)}</span>`).join("");
         return `<tr>
-          <td>${esc(c.full_name)}</td>
-          <td>${esc(c.primary_email) || "—"}</td>
-          <td>${esc(c.company_name) || "—"}</td>
-          <td class="sources">${sources || "—"}</td>
+          <td><div class="cell">${esc(c.full_name)}</div></td>
+          <td><div class="cell">${esc(c.primary_email) || "—"}</div></td>
+          <td><div class="cell">${esc(c.phone) || "—"}</div></td>
+          <td><div class="cell">${esc(c.job_title) || "—"}</div></td>
+          <td><div class="cell">${esc(c.company_name) || "—"}</div></td>
+          <td><div class="cell custom">${custom || "—"}</div></td>
+          <td><div class="cell sources">${sources || "—"}</div></td>
         </tr>`;
       }).join("");
       box.innerHTML = `<table>
-        <thead><tr><th>Name</th><th>Email</th><th>Company</th><th>Sources</th></tr></thead>
+        <thead><tr>
+          <th>Name</th><th>Email</th><th>Phone</th><th>Title</th>
+          <th>Company</th><th>Custom Fields</th><th>Sources</th>
+        </tr></thead>
         <tbody>${rows}</tbody></table>`;
     }
 
