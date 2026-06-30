@@ -98,6 +98,17 @@
     }
     .custom span b { color: var(--text); font-weight: 600; }
     .empty { color: var(--muted); font-style: italic; padding: 16px 0; }
+    .group { margin-top: 24px; }
+    .group h3 {
+      display: flex; align-items: center; gap: 10px; margin: 0 0 4px;
+      font-size: 13px; text-transform: uppercase; letter-spacing: .05em; color: var(--accent);
+    }
+    .group-count {
+      background: var(--panel); border: 1px solid var(--line); border-radius: 999px;
+      padding: 0 8px; font-size: 11px; color: var(--muted);
+    }
+    .table-wrap { overflow-x: auto; }
+    .na { color: var(--muted); font-style: italic; }
   </style>
 </head>
 <body>
@@ -108,16 +119,16 @@
   <main>
     <section>
       <h2>Integrations <button class="refresh" onclick="loadIntegrations()">↻ rediscover</button></h2>
-      <p class="hint">Click an integration to sync its contacts into My Awesome CRM.</p>
+      <p class="hint">Click an integration to sync its records into My Awesome CRM.</p>
       <div class="integrations" id="integrations"><span class="empty">Discovering…</span></div>
     </section>
 
     <div id="status"></div>
 
     <section>
-      <h2>Contacts <button class="refresh" onclick="loadContacts()">↻ refresh</button></h2>
+      <h2>Records <button class="refresh" onclick="loadRecords()">↻ refresh</button></h2>
       <div class="count zero" id="count">—</div>
-      <div id="contacts"></div>
+      <div id="records"></div>
     </section>
   </main>
 
@@ -169,10 +180,10 @@
         const data = await res.json();
         if (!res.ok) throw new Error(data.detail || ("HTTP " + res.status));
         setStatus(
-          `✓ ${name}: fetched ${data.fetched}, created ${data.created}, updated ${data.updated}`,
+          `✓ ${name}: fetched ${data.fetched}, stored ${data.stored}, replaced ${data.replaced}`,
           "ok"
         );
-        await loadContacts();
+        await loadRecords();
       } catch (e) {
         setStatus("✗ " + name + ": " + e.message, "err");
       } finally {
@@ -183,48 +194,84 @@
       }
     }
 
-    async function loadContacts() {
+    async function loadRecords() {
       try {
         const res = await fetch("/records?limit=200");
         if (!res.ok) throw new Error("HTTP " + res.status);
         const data = await res.json();
-        renderContacts(data);
+        renderRecords(data);
       } catch (e) {
-        setStatus("Failed to load contacts: " + e.message, "err");
+        setStatus("Failed to load records: " + e.message, "err");
       }
     }
 
-    function renderContacts({ items, total }) {
+    // Group records by their data_type, preserving first-seen order.
+    function groupByType(items) {
+      const groups = new Map();
+      for (const row of items) {
+        const t = row.data_type || "(unknown)";
+        if (!groups.has(t)) groups.set(t, []);
+        groups.get(t).push(row);
+      }
+      return groups;
+    }
+
+    // Format one data value for display. Returns null when the value is
+    // considered "missing" (absent key, null, or empty string).
+    function fmtValue(v) {
+      if (v === undefined || v === null || v === "") return null;
+      if (typeof v === "object") return JSON.stringify(v);
+      return String(v);
+    }
+
+    function renderRecords({ items, total }) {
       const count = $("count");
-      count.textContent = total + (total === 1 ? " contact" : " contacts");
+      count.textContent = total + (total === 1 ? " record" : " records");
       count.className = "count" + (total === 0 ? " zero" : "");
 
-      const box = $("contacts");
+      const box = $("records");
       if (!items.length) {
-        box.innerHTML = '<div class="empty">No contacts yet — ingest an integration above.</div>';
+        box.innerHTML = '<div class="empty">No records yet — ingest an integration above.</div>';
         return;
       }
-      const rows = items.map((row) => {
-        const c = row.data || {};
-        const source = `<span>${esc(row.source)}</span>`;
-        const custom = Object.entries(c.custom_fields || {})
-          .map(([k, v]) => `<span><b>${esc(k)}:</b> ${esc(v)}</span>`).join("");
-        return `<tr>
-          <td><div class="cell">${esc(c.full_name)}</div></td>
-          <td><div class="cell">${esc(c.primary_email) || "—"}</div></td>
-          <td><div class="cell">${esc(c.phone) || "—"}</div></td>
-          <td><div class="cell">${esc(c.job_title) || "—"}</div></td>
-          <td><div class="cell">${esc(c.company_name) || "—"}</div></td>
-          <td><div class="cell custom">${custom || "—"}</div></td>
-          <td><div class="cell sources">${source}</div></td>
-        </tr>`;
-      }).join("");
-      box.innerHTML = `<table>
-        <thead><tr>
-          <th>Name</th><th>Email</th><th>Phone</th><th>Title</th>
-          <th>Company</th><th>Custom Fields</th><th>Source</th>
-        </tr></thead>
-        <tbody>${rows}</tbody></table>`;
+
+      const sections = [];
+      for (const [dataType, rows] of groupByType(items)) {
+        // 1) Compute every possible header for this group, across all its rows.
+        const keys = new Set();
+        for (const row of rows) {
+          for (const k of Object.keys(row.data || {})) keys.add(k);
+        }
+        const headers = Array.from(keys).sort();
+
+        // 2) Header row: a fixed Source column, then every data key.
+        const thead = ["source", ...headers]
+          .map((h) => `<th>${esc(h)}</th>`).join("");
+
+        // 3) Body: one row per record; missing values render as N/A.
+        const body = rows.map((row) => {
+          const data = row.data || {};
+          const cells = [`<td><div class="cell">${esc(row.source)}</div></td>`];
+          for (const h of headers) {
+            const val = fmtValue(data[h]);
+            const inner = val === null ? '<span class="na">N/A</span>' : esc(val);
+            cells.push(`<td><div class="cell">${inner}</div></td>`);
+          }
+          return `<tr>${cells.join("")}</tr>`;
+        }).join("");
+
+        sections.push(`
+          <div class="group">
+            <h3>${esc(dataType)} <span class="group-count">${rows.length}</span></h3>
+            <div class="table-wrap">
+              <table>
+                <thead><tr>${thead}</tr></thead>
+                <tbody>${body}</tbody>
+              </table>
+            </div>
+          </div>`);
+      }
+      box.innerHTML = sections.join("");
     }
 
     function esc(v) {
@@ -234,9 +281,9 @@
       }[ch]));
     }
 
-    // Boot: discover integrations, then show the (initially empty) contact list.
+    // Boot: discover integrations, then show the (initially empty) record list.
     loadIntegrations();
-    loadContacts();
+    loadRecords();
   </script>
 </body>
 </html>
