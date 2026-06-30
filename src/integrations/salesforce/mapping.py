@@ -1,71 +1,62 @@
+import logging
 from typing import Any
 
-def map_contact(source_record: dict[str, Any]) -> dict[str, Any]:
+logger = logging.getLogger(__name__)
+
+CONSUMED_KEYS = {
+    "Id",
+    "Name",
+    "FirstName",
+    "LastName",
+    "Email",
+    "Phone",
+    "MobilePhone",
+    "Title",
+    "Account",
+}
+
+def map_contact_record(raw_record: dict[str, Any]) -> dict[str, Any]:
     """
     Implements SalesforceContactMapping contract.
-    Maps a raw Salesforce Contact record to a host-standard Contact data dict.
+    Converts a raw Salesforce Contact record into a standardized contact data dict.
     """
-    # 1. provider_id: Always 'salesforce'
-    # 2. external_id: The record's Id
-    external_id = source_record.get("Id")
+    # 1. external_id
+    external_id = raw_record.get("Id")
 
-    # 3. full_name derivation
-    # Rule 1: Name field (stripped)
-    name_field = source_record.get("Name")
-    if name_field and isinstance(name_field, str) and name_field.strip():
-        full_name = name_field.strip()
-    else:
-        # Rule 2: FirstName + LastName
-        first_name = (source_record.get("FirstName") or "").strip()
-        last_name = (source_record.get("LastName") or "").strip()
-        joined = f"{first_name} {last_name}".strip()
-        # Rule 3: Otherwise empty string
-        full_name = joined if joined else ""
-
-    # 4. primary_email
-    email_val = source_record.get("Email")
-    if email_val and isinstance(email_val, str) and email_val.strip():
-        primary_email = email_val.strip().lower()
-    else:
-        primary_email = None
-
-    # 5. phone
-    # Phone when present and non-empty; otherwise MobilePhone; otherwise None.
-    phone = source_record.get("Phone")
-    if not (phone and isinstance(phone, str) and phone.strip()):
-        phone = source_record.get("MobilePhone")
+    # 2. full_name derivation
+    # Rule 1: Name field
+    full_name = raw_record.get("Name")
+    if full_name:
+        full_name = full_name.strip()
     
-    if not (phone and isinstance(phone, str) and phone.strip()):
-        phone = None
-    else:
-        phone = phone.strip()
+    # Rule 2: FirstName + LastName
+    if not full_name:
+        first = raw_record.get("FirstName") or ""
+        last = raw_record.get("LastName") or ""
+        full_name = f"{first} {last}".strip()
+    
+    # Rule 3: Fallback to empty string
+    if not full_name:
+        full_name = ""
 
-    # 6. job_title
-    job_title = source_record.get("Title")
-    if not (job_title and isinstance(job_title, str) and job_title.strip()):
-        job_title = None
-    else:
-        job_title = job_title.strip()
+    # 3. primary_email
+    email = raw_record.get("Email")
+    primary_email = email.strip().lower() if email else None
 
-    # 7. company_name
-    # Account.Name or None
-    account = source_record.get("Account")
+    # 4. job_title
+    job_title = raw_record.get("Title") or None
+
+    # 5. company_name (Account.Name)
     company_name = None
+    account = raw_record.get("Account")
     if isinstance(account, dict):
-        acc_name = account.get("Name")
-        if acc_name and isinstance(acc_name, str) and acc_name.strip():
-            company_name = acc_name.strip()
+        company_name = account.get("Name") or None
 
-    # 8. custom_fields
-    # Every field not consumed and not API metadata (attributes).
-    consumed_keys = {
-        "Id", "Name", "FirstName", "LastName", "Email", 
-        "Phone", "MobilePhone", "Title", "Account", "attributes"
-    }
-    
+    # 6. custom_fields
+    # Exclude consumed keys and 'attributes' metadata
     custom_fields = {
-        k: v for k, v in source_record.items() 
-        if k not in consumed_keys
+        k: v for k, v in raw_record.items()
+        if k not in CONSUMED_KEYS and k != "attributes"
     }
 
     return {
@@ -73,7 +64,6 @@ def map_contact(source_record: dict[str, Any]) -> dict[str, Any]:
         "external_id": external_id,
         "full_name": full_name,
         "primary_email": primary_email,
-        "phone": phone,
         "job_title": job_title,
         "company_name": company_name,
         "custom_fields": custom_fields,

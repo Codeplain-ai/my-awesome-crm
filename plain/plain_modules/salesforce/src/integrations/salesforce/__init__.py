@@ -1,36 +1,30 @@
-from typing import Any, Callable, List
+from typing import Any
 
-from .mapping import map_account, map_contact
+from .client import SalesforceClient
+from .mapping import map_contact_record
 
-__all__ = ["fetch"]
+# DATA_TYPE is used by the host if records are returned without a data_type key.
+DATA_TYPE = "contact"
+
+__all__ = ["fetch", "DATA_TYPE"]
 
 
-def fetch(get_stored: Callable[[str], List[dict[str, Any]]]) -> List[dict[str, Any]]:
+def fetch(get_stored: Any = None) -> list[dict[str, Any]]:
     """
-    Primary entry point for the Salesforce integration.
-    Pulls Contacts and Accounts from Salesforce REST API.
-    """
-    from .client import SalesforceClient
+    Fetches all contact records from Salesforce and maps them.
 
+    This is the entry point for the host's ingest service.
+    get_stored is a callback to retrieve existing records, ignored by this integration.
+    """
     client = SalesforceClient()
-    
-    # 1. Fetch Contacts
-    contact_soql = (
-        "SELECT Id, Name, FirstName, LastName, Email, Phone, MobilePhone, "
-        "Title, Account.Name FROM Contact"
-    )
-    raw_contacts = client.query_all(contact_soql)
-    mapped_contacts = [
-        {"data_type": "contact", "data": map_contact(r)}
-        for r in raw_contacts
-    ]
+    raw_records = client.query_all_contacts()
 
-    # 2. Fetch Accounts
-    account_soql = "SELECT Id, Name, Website, Phone, Industry FROM Account"
-    raw_accounts = client.query_all(account_soql)
-    mapped_accounts = [
-        {"data_type": "account", "data": map_account(r)}
-        for r in raw_accounts
-    ]
+    results = []
+    for raw in raw_records:
+        mapped_data = map_contact_record(raw)
+        results.append({
+            "data_type": DATA_TYPE,
+            "data": mapped_data,
+        })
 
-    return mapped_contacts + mapped_accounts
+    return results

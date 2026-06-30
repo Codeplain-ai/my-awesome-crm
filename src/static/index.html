@@ -47,7 +47,7 @@
     main { max-width: 1280px; margin: 0 auto; padding: 24px 32px; }
     section { margin-bottom: 32px; }
     h2 {
-      display: flex; align-items: center; gap: 12px;
+      display: flex; align-items: center; gap: 12px; margin: 0 0 12px;
       font-size: 14px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted);
     }
     .hint { margin: 4px 0 14px; font-size: 13px; color: var(--muted); }
@@ -99,6 +99,7 @@
     .custom span b { color: var(--text); font-weight: 600; }
     .empty { color: var(--muted); font-style: italic; padding: 16px 0; }
     .group { margin-top: 24px; }
+    .group:first-child { margin-top: 0; }
     .group h3 {
       display: flex; align-items: center; gap: 10px; margin: 0 0 4px;
       font-size: 13px; text-transform: uppercase; letter-spacing: .05em; color: var(--accent);
@@ -119,15 +120,14 @@
   <main>
     <section>
       <h2>Integrations <button class="refresh" onclick="loadIntegrations()">↻ rediscover</button></h2>
-      <p class="hint">Click an integration to sync its records into My Awesome CRM.</p>
+      <p class="hint">Click an integration to sync it with My Awesome CRM.</p>
       <div class="integrations" id="integrations"><span class="empty">Discovering…</span></div>
     </section>
 
     <div id="status"></div>
 
     <section>
-      <h2>Records <button class="refresh" onclick="loadRecords()">↻ refresh</button></h2>
-      <div class="count zero" id="count">—</div>
+      <h2><button class="refresh" onclick="loadRecords()">↻ refresh</button></h2>
       <div id="records"></div>
     </section>
   </main>
@@ -217,18 +217,18 @@
     }
 
     // Format one data value for display. Returns null when the value is
-    // considered "missing" (absent key, null, or empty string).
+    // considered "empty" — absent key, null, empty string, empty array, or
+    // empty object (e.g. a custom_fields of {}).
     function fmtValue(v) {
       if (v === undefined || v === null || v === "") return null;
-      if (typeof v === "object") return JSON.stringify(v);
+      if (typeof v === "object") {
+        if (Object.keys(v).length === 0) return null;
+        return JSON.stringify(v);
+      }
       return String(v);
     }
 
-    function renderRecords({ items, total }) {
-      const count = $("count");
-      count.textContent = total + (total === 1 ? " record" : " records");
-      count.className = "count" + (total === 0 ? " zero" : "");
-
+    function renderRecords({ items }) {
       const box = $("records");
       if (!items.length) {
         box.innerHTML = '<div class="empty">No records yet — ingest an integration above.</div>';
@@ -237,12 +237,17 @@
 
       const sections = [];
       for (const [dataType, rows] of groupByType(items)) {
-        // 1) Compute every possible header for this group, across all its rows.
+        // 1) Compute every possible header for this group, across all its rows,
+        //    then keep only those with a non-empty value in at least one row
+        //    (a column that is empty for every row — e.g. custom_fields all {} —
+        //    is dropped).
         const keys = new Set();
         for (const row of rows) {
           for (const k of Object.keys(row.data || {})) keys.add(k);
         }
-        const headers = Array.from(keys).sort();
+        const headers = Array.from(keys)
+          .filter((k) => rows.some((row) => fmtValue((row.data || {})[k]) !== null))
+          .sort();
 
         // 2) Header row: a fixed Source column, then every data key.
         const thead = ["source", ...headers]

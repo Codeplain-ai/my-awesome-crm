@@ -1,1 +1,1 @@
-# Marker file for pytest
+# Package marker for pytest
