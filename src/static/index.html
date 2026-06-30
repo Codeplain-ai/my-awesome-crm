@@ -185,7 +185,7 @@
 
     async function loadContacts() {
       try {
-        const res = await fetch("/contacts?limit=200");
+        const res = await fetch("/records?limit=200");
         if (!res.ok) throw new Error("HTTP " + res.status);
         const data = await res.json();
         renderContacts(data);
@@ -204,9 +204,9 @@
         box.innerHTML = '<div class="empty">No contacts yet — ingest an integration above.</div>';
         return;
       }
-      const rows = items.map((c) => {
-        const sources = (c.source_links || [])
-          .map((s) => `<span>${s.provider_id}</span>`).join("");
+      const rows = items.map((row) => {
+        const c = row.data || {};
+        const source = `<span>${esc(row.source)}</span>`;
         const custom = Object.entries(c.custom_fields || {})
           .map(([k, v]) => `<span><b>${esc(k)}:</b> ${esc(v)}</span>`).join("");
         return `<tr>
@@ -216,13 +216,13 @@
           <td><div class="cell">${esc(c.job_title) || "—"}</div></td>
           <td><div class="cell">${esc(c.company_name) || "—"}</div></td>
           <td><div class="cell custom">${custom || "—"}</div></td>
-          <td><div class="cell sources">${sources || "—"}</div></td>
+          <td><div class="cell sources">${source}</div></td>
         </tr>`;
       }).join("");
       box.innerHTML = `<table>
         <thead><tr>
           <th>Name</th><th>Email</th><th>Phone</th><th>Title</th>
-          <th>Company</th><th>Custom Fields</th><th>Sources</th>
+          <th>Company</th><th>Custom Fields</th><th>Source</th>
         </tr></thead>
         <tbody>${rows}</tbody></table>`;
     }

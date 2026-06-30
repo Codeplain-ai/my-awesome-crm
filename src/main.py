@@ -10,7 +10,7 @@ from pythonjsonlogger import jsonlogger
 from src.config import settings, load_dotenv
 from src.db import engine
 from sqlmodel import SQLModel
-from src.api import health, contacts, ingest
+from src.api import health, records, ingest
 
 STATIC_DIR = Path(__file__).parent / "static"
 
@@ -45,7 +45,7 @@ app = FastAPI(title="My Awesome CRM", lifespan=lifespan)
 # Routes — the server is unauthenticated. The only credentials in play are the
 # per-provider ones each integration reads from the environment when it runs.
 app.include_router(health.router)
-app.include_router(contacts.router, prefix="/contacts", tags=["contacts"])
+app.include_router(records.router, prefix="/records", tags=["records"])
 app.include_router(ingest.router, prefix="/ingest", tags=["ingest"])
 
 @app.get("/", include_in_schema=False)

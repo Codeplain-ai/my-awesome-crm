@@ -1,36 +1,20 @@
 from datetime import datetime
 from typing import Any
-from pydantic import BaseModel, EmailStr
+from pydantic import BaseModel
 
-class SourceLinkRead(BaseModel):
-    provider_id: str
-    external_id: str
-    last_synced_at: datetime
 
-class ContactRead(BaseModel):
+class StoredRecord(BaseModel):
+    """API view of one stored row."""
     id: int
-    full_name: str
-    primary_email: EmailStr | None = None
-    phone: str | None = None
-    job_title: str | None = None
-    company_name: str | None = None
-    source_links: list[SourceLinkRead]
-    custom_fields: dict[str, Any]
+    data_type: str
+    source: str
+    data: dict[str, Any]
     created_at: datetime
     updated_at: datetime
 
-class ContactListResponse(BaseModel):
-    items: list[ContactRead]
+
+class RecordListResponse(BaseModel):
+    items: list[StoredRecord]
     total: int
     limit: int
     offset: int
-
-class IncomingContact(BaseModel):
-    provider_id: str
-    external_id: str
-    full_name: str
-    primary_email: EmailStr | None = None
-    phone: str | None = None
-    job_title: str | None = None
-    company_name: str | None = None
-    custom_fields: dict[str, Any] = {}
