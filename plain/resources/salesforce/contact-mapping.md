@@ -1,19 +1,25 @@
-# Salesforce Contact → IncomingContact mapping contract
+# Salesforce Contact → contact-data mapping contract
 
 The field-by-field contract for the pure mapping function of the Salesforce integration. The
 input is a dict shaped like one entry of the `records[]` array returned by the Salesforce REST
 query API for the `Contact` object (see the `ContactRecord` schema in
-`resources/salesforce/openapi.yaml`). The output is an `IncomingContact` dict with exactly the
+`resources/salesforce/openapi.yaml`). The output is a contact `data` dict — the conventional
+contact shape the host stores verbatim under the `data` of a `contact` record. It has exactly the
 keys listed below.
+
+The host does **not** validate this dict: there is no deduplication, no merging, and no required
+field. The mapping therefore maps best-effort and never raises for missing or malformed values —
+it simply emits the keys below, using `None` (or an empty string for `full_name`) where a value is
+absent.
 
 ## Field mapping rules
 
 | Output key | Source | Rule |
 |---|---|---|
 | `provider_id` | — | Always the literal string `salesforce`. |
-| `external_id` | `Id` | Required — raise `ValueError` if missing or empty. |
+| `external_id` | `Id` | The record's `Id`, or `None` when missing. |
 | `full_name` | `Name`, else `FirstName` + `LastName` | See *full_name derivation* below. |
-| `primary_email` | `Email` | See *primary_email validation* below. |
+| `primary_email` | `Email` | See *primary_email* below. |
 | `phone` | `Phone`, else `MobilePhone` | `Phone` when present and non-empty; otherwise `MobilePhone`; otherwise `None`. |
 | `job_title` | `Title` | The `Title` field, or `None` when missing or empty. |
 | `company_name` | `Account.Name` | The `Name` value of the nested `Account` object, or `None` when `Account` is null, missing, or has no non-empty name. |
@@ -24,18 +30,14 @@ keys listed below.
 1. `full_name` is the `Name` field when present and non-empty, with surrounding whitespace stripped.
 2. Otherwise it is `FirstName` and `LastName` joined by a single space, each treated as empty when
    null, with surrounding whitespace stripped.
-3. Otherwise raise `ValueError`, because `IncomingContact` requires a non-empty `full_name`.
+3. Otherwise it is an empty string. The mapping never raises for a missing name.
 
-## primary_email validation
+## primary_email
 
-- `primary_email` is the `Email` field, lowercased and trimmed, but only when it is a valid email
-  address; otherwise `None`.
+- `primary_email` is the `Email` field, lowercased and trimmed.
 - A missing or empty `Email` maps to `None`.
-- A non-empty `Email` that is not a valid email address also maps to `None` so the contact still
-  maps; a warning is logged naming the contact's `Id`. This is **not** a record-skip.
-- Email validity is judged the same way the host judges it (the host's `email-validator` with
-  deliverability / DNS checks disabled, matching the host's email-typed field), so any value
-  emitted here is always accepted by the host's `IncomingContact` contract.
+- The value is passed through as-is otherwise; the host does not validate email format, so no
+  validity check is performed and no value is discarded.
 
 ## custom_fields rules
 
@@ -49,6 +51,6 @@ keys listed below.
 
 ## Error contract
 
-- The function raises `ValueError` for exactly two conditions: a missing/empty `Id`, or an
-  underivable `full_name` (rules above). Everything else maps without raising.
-- Callers (the integration's skip-and-log policy) treat a `ValueError` as "skip this one record".
+- The mapping function does not raise for record content — every input maps to an output dict.
+- Errors that are not per-record mapping concerns (missing credentials, authentication failure,
+  transport/HTTP errors) are raised by the `fetch(get_stored)` entry point, not by this function.

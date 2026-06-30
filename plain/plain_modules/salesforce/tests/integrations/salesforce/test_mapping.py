@@ -1,93 +1,152 @@
 import pytest
-from src.integrations.salesforce.mapping import map_contact_record
+from src.integrations.salesforce.mapping import map_contact
 
-def test_map_complete_record():
+def test_map_contact_full_payload():
+    """Tests mapping with all fields populated."""
     raw = {
-        "attributes": {"type": "Contact", "url": "/services/data/v60.0/sobjects/Contact/003..."},
-        "Id": "003Qy0000085W6SIAU",
-        "Name": "John Doe",
-        "Email": "JOHN.DOE@example.com ",
-        "Phone": "+1-555-010-999",
-        "MobilePhone": "555-0000",
-        "Title": "Engineering Manager",
+        "attributes": {"type": "Contact", "url": "/svc/data/v60.0/sobjects/Contact/003"},
+        "Id": "0031",
+        "Name": " Jane Doe ",
+        "FirstName": "Jane",
+        "LastName": "Doe",
+        "Email": " JANE.doe@EXAMPLE.com ",
+        "Phone": "555-1234",
+        "MobilePhone": "555-6789",
+        "Title": "Engineer",
         "Account": {
-            "attributes": {"type": "Account", "url": "/..."},
+            "attributes": {"type": "Account", "url": "/svc/001"},
             "Name": "Acme Corp"
         },
-        "Department": "Platform",
-        "Birthdate": "1990-01-01"
+        "Department": "R&D",
+        "LeadSource": "Web"
     }
     
-    result = map_contact_record(raw)
+    mapped = map_contact(raw)
     
-    assert result["provider_id"] == "salesforce"
-    assert result["external_id"] == "003Qy0000085W6SIAU"
-    assert result["full_name"] == "John Doe"
-    assert result["primary_email"] == "john.doe@example.com"
-    assert result["phone"] == "+1-555-010-999"
-    assert result["job_title"] == "Engineering Manager"
-    assert result["company_name"] == "Acme Corp"
-    assert result["custom_fields"] == {"Department": "Platform", "Birthdate": "1990-01-01"}
+    assert mapped["provider_id"] == "salesforce"
+    assert mapped["external_id"] == "0031"
+    assert mapped["full_name"] == "Jane Doe"
+    assert mapped["primary_email"] == "jane.doe@example.com"
+    assert mapped["phone"] == "555-1234"
+    assert mapped["job_title"] == "Engineer"
+    assert mapped["company_name"] == "Acme Corp"
+    assert mapped["custom_fields"] == {"Department": "R&D", "LeadSource": "Web"}
 
-def test_name_derivation_fallback():
-    # Case: Name is missing, use FirstName + LastName
+def test_map_contact_name_derivation_fallback():
+    """Tests full_name derivation when 'Name' is missing."""
     raw = {
-        "Id": "SF001",
-        "FirstName": " Jane ",
-        "LastName": "Smith "
+        "Id": "0032",
+        "FirstName": "John",
+        "LastName": "Smith"
     }
-    result = map_contact_record(raw)
-    assert result["full_name"] == "Jane Smith"
+    mapped = map_contact(raw)
+    assert mapped["full_name"] == "John Smith"
 
-def test_missing_id_raises_value_error():
-    raw = {"Name": "No Id"}
-    with pytest.raises(ValueError, match="missing required 'Id'"):
-        map_contact_record(raw)
+def test_map_contact_name_derivation_empty():
+    """Tests full_name derivation when all name components are missing."""
+    raw = {"Id": "0033"}
+    mapped = map_contact(raw)
+    assert mapped["full_name"] == ""
 
-def test_underivable_name_raises_value_error():
-    raw = {"Id": "SF002", "Email": "anon@example.com"}
-    with pytest.raises(ValueError, match="no derivable name"):
-        map_contact_record(raw)
-
-def test_invalid_email_maps_to_none(caplog):
+def test_map_contact_phone_fallback():
+    """Tests phone falls back to MobilePhone if Phone is missing."""
     raw = {
-        "Id": "SF003",
-        "Name": "Bad Email User",
-        "Email": "not-an-email"
+        "Id": "0034",
+        "MobilePhone": " 555-9999 "
     }
-    result = map_contact_record(raw)
-    assert result["primary_email"] is None
-    assert "invalid email" in caplog.text
-    assert "SF003" in caplog.text
+    mapped = map_contact(raw)
+    assert mapped["phone"] == "555-9999"
 
-def test_phone_priority():
-    # Phone present, MobilePhone present -> Use Phone
-    raw = {"Id": "P1", "Name": "N", "Phone": "123", "MobilePhone": "456"}
-    assert map_contact_record(raw)["phone"] == "123"
-    
-    # Phone missing, MobilePhone present -> Use MobilePhone
-    raw2 = {"Id": "P2", "Name": "N", "Phone": None, "MobilePhone": "456"}
-    assert map_contact_record(raw2)["phone"] == "456"
+def test_map_contact_email_none():
+    """Tests primary_email maps to None when missing or empty."""
+    assert map_contact({"Id": "1"})["primary_email"] is None
+    assert map_contact({"Id": "1", "Email": " "})["primary_email"] is None
 
-def test_company_name_extraction():
-    # Nested Account name
-    raw = {"Id": "C1", "Name": "N", "Account": {"Name": " Global Inc "}}
-    assert map_contact_record(raw)["company_name"] == "Global Inc"
-    
-    # Account is None
-    raw2 = {"Id": "C2", "Name": "N", "Account": None}
-    assert map_contact_record(raw2)["company_name"] is None
-
-def test_custom_fields_excludes_metadata():
+def test_map_contact_company_name_null_account():
+    """Tests company_name is None when Account object is null."""
     raw = {
-        "Id": "X1",
-        "Name": "N",
-        "attributes": {"foo": "bar"},
-        "Custom_Field__c": "Value",
-        "Account": {"attributes": {}, "Name": "A"}
+        "Id": "0035",
+        "Account": None
     }
-    result = map_contact_record(raw)
-    # Account and attributes should not be in custom_fields
-    assert "Custom_Field__c" in result["custom_fields"]
-    assert "attributes" not in result["custom_fields"]
-    assert "Account" not in result["custom_fields"]
+    mapped = map_contact(raw)
+    assert mapped["company_name"] is None
+
+def test_map_contact_custom_fields_exclusion():
+    """Tests that attributes and consumed fields are excluded from custom_fields."""
+    raw = {
+        "Id": "0036",
+        "Name": "Name",
+        "attributes": {"some": "meta"},
+        "Account": {"Name": "Acc", "attributes": {}},
+        "SecretField": "Hidden"
+    }
+    mapped = map_contact(raw)
+    # custom_fields should ONLY contain 'SecretField'
+    assert mapped["custom_fields"] == {"SecretField": "Hidden"}
+
+import os
+from unittest.mock import patch, MagicMock
+from src.integrations.salesforce import fetch
+
+def test_fetch_missing_credentials():
+    """Tests that fetch raises RuntimeError if env vars are missing."""
+    with patch.dict(os.environ, {}, clear=True):
+        with pytest.raises(RuntimeError) as exc:
+            fetch(lambda _: [])
+        assert "SALESFORCE_ENDPOINT" in str(exc.value)
+
+@patch("httpx.Client")
+def test_fetch_success_with_pagination(mock_client_class):
+    """Tests full fetch flow including auth and 2-page pagination."""
+    mock_client = MagicMock()
+    mock_client_class.return_value.__enter__.return_value = mock_client
+    
+    # Mock environment
+    env = {
+        "SALESFORCE_ENDPOINT": "https://login.salesforce.com",
+        "SALESFORCE_CLIENT_ID": "id",
+        "SALESFORCE_CLIENT_SECRET": "secret"
+    }
+    
+    # Define response sequence
+    # 1. Auth Response
+    res_auth = MagicMock()
+    res_auth.status_code = 200
+    res_auth.json.return_value = {
+        "access_token": "token123",
+        "instance_url": "https://na1.salesforce.com"
+    }
+    
+    # 2. First Page Response (done=False)
+    res_p1 = MagicMock()
+    res_p1.status_code = 200
+    res_p1.json.return_value = {
+        "totalSize": 2,
+        "done": False,
+        "nextRecordsUrl": "/services/data/v60.0/query/next-page-id",
+        "records": [{"Id": "c1", "LastName": "One"}]
+    }
+    
+    # 3. Second Page Response (done=True)
+    res_p2 = MagicMock()
+    res_p2.status_code = 200
+    res_p2.json.return_value = {
+        "totalSize": 2,
+        "done": True,
+        "records": [{"Id": "c2", "LastName": "Two"}]
+    }
+    
+    mock_client.post.return_value = res_auth
+    mock_client.get.side_effect = [res_p1, res_p2]
+    
+    with patch.dict(os.environ, env):
+        results = fetch(lambda _: [])
+    
+    assert len(results) == 2
+    assert results[0]["external_id"] == "c1"
+    assert results[1]["external_id"] == "c2"
+    
+    # Verify auth was called
+    mock_client.post.assert_called_once()
+    # Verify query was called twice (initial + next)
+    assert mock_client.get.call_count == 2

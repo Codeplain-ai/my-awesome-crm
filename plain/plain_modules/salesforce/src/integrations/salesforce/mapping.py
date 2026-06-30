@@ -1,73 +1,72 @@
-import logging
-from typing import Any, Dict, Optional
-from email_validator import validate_email, EmailNotValidError
+from typing import Any
 
-logger = logging.getLogger(__name__)
-
-def map_contact_record(record: Dict[str, Any]) -> Dict[str, Any]:
+def map_contact(source_record: dict[str, Any]) -> dict[str, Any]:
     """
-    Implements the SalesforceContactMapping contract.
-    Converts a raw Salesforce Contact record into an IncomingContact dict.
+    Implements SalesforceContactMapping contract.
+    Maps a raw Salesforce Contact record to a host-standard Contact data dict.
     """
-    # 1. external_id mapping
-    external_id = record.get("Id")
-    if not external_id:
-        raise ValueError("Salesforce record is missing required 'Id' field.")
+    # 1. provider_id: Always 'salesforce'
+    # 2. external_id: The record's Id
+    external_id = source_record.get("Id")
 
-    # 2. full_name derivation
-    full_name: Optional[str] = None
-    sf_name = record.get("Name")
-    if sf_name and sf_name.strip():
-        full_name = sf_name.strip()
+    # 3. full_name derivation
+    # Rule 1: Name field (stripped)
+    name_field = source_record.get("Name")
+    if name_field and isinstance(name_field, str) and name_field.strip():
+        full_name = name_field.strip()
     else:
-        first = (record.get("FirstName") or "").strip()
-        last = (record.get("LastName") or "").strip()
-        combined = f"{first} {last}".strip()
-        if combined:
-            full_name = combined
+        # Rule 2: FirstName + LastName
+        first_name = (source_record.get("FirstName") or "").strip()
+        last_name = (source_record.get("LastName") or "").strip()
+        joined = f"{first_name} {last_name}".strip()
+        # Rule 3: Otherwise empty string
+        full_name = joined if joined else ""
 
-    if not full_name:
-        raise ValueError(f"Salesforce record {external_id} has no derivable name.")
+    # 4. primary_email
+    email_val = source_record.get("Email")
+    if email_val and isinstance(email_val, str) and email_val.strip():
+        primary_email = email_val.strip().lower()
+    else:
+        primary_email = None
 
-    # 3. primary_email validation
-    primary_email: Optional[str] = None
-    raw_email = record.get("Email")
-    if raw_email and raw_email.strip():
-        email_to_check = raw_email.strip().lower()
-        try:
-            # check_deliverability=False as per requirements
-            valid = validate_email(email_to_check, check_deliverability=False)
-            primary_email = valid.normalized
-        except EmailNotValidError:
-            logger.warning(
-                f"Contact {external_id} has invalid email: {raw_email}. Mapping to None."
-            )
-            primary_email = None
+    # 5. phone
+    # Phone when present and non-empty; otherwise MobilePhone; otherwise None.
+    phone = source_record.get("Phone")
+    if not (phone and isinstance(phone, str) and phone.strip()):
+        phone = source_record.get("MobilePhone")
+    
+    if not (phone and isinstance(phone, str) and phone.strip()):
+        phone = None
+    else:
+        phone = phone.strip()
 
-    # 4. phone mapping
-    phone = (record.get("Phone") or record.get("MobilePhone") or None)
+    # 6. job_title
+    job_title = source_record.get("Title")
+    if not (job_title and isinstance(job_title, str) and job_title.strip()):
+        job_title = None
+    else:
+        job_title = job_title.strip()
 
-    # 5. job_title mapping
-    job_title = (record.get("Title") or None)
-
-    # 6. company_name mapping
-    company_name: Optional[str] = None
-    account = record.get("Account")
+    # 7. company_name
+    # Account.Name or None
+    account = source_record.get("Account")
+    company_name = None
     if isinstance(account, dict):
-        account_name = account.get("Name")
-        if account_name and account_name.strip():
-            company_name = account_name.strip()
+        acc_name = account.get("Name")
+        if acc_name and isinstance(acc_name, str) and acc_name.strip():
+            company_name = acc_name.strip()
 
-    # 7. custom_fields and consumed keys
+    # 8. custom_fields
+    # Every field not consumed and not API metadata (attributes).
     consumed_keys = {
         "Id", "Name", "FirstName", "LastName", "Email", 
         "Phone", "MobilePhone", "Title", "Account", "attributes"
     }
     
-    custom_fields = {}
-    for key, value in record.items():
-        if key not in consumed_keys:
-            custom_fields[key] = value
+    custom_fields = {
+        k: v for k, v in source_record.items() 
+        if k not in consumed_keys
+    }
 
     return {
         "provider_id": "salesforce",
@@ -77,5 +76,5 @@ def map_contact_record(record: Dict[str, Any]) -> Dict[str, Any]:
         "phone": phone,
         "job_title": job_title,
         "company_name": company_name,
-        "custom_fields": custom_fields
+        "custom_fields": custom_fields,
     }
