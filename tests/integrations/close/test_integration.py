@@ -1,58 +1,66 @@
 import pytest
-from unittest.mock import patch, MagicMock
-from src.integrations.close import fetch_contacts
+from unittest.mock import MagicMock, patch
+from src.integrations.close import fetch
 
-@patch.dict("os.environ", {"CLOSE_API_KEY": "test-key"})
-@patch("httpx.Client.get")
-def test_fetch_contacts_multi_page_and_skip_logic(mock_get):
-    # Setup: 2 pages. 
-    # Page 1: 1 good record, 1 bad record (missing ID)
-    # Page 2: 1 good record
+@patch("src.integrations.close.httpx.Client")
+@patch.dict("os.environ", {"CLOSE_API_KEY": "test_key"})
+def test_fetch_pagination(mock_client_class):
+    # Mock responses for two pages
+    mock_client = MagicMock()
+    mock_client_class.return_value.__enter__.return_value = mock_client
     
-    page1 = {
-        "data": [
-            {"id": "c1", "name": "Good One"},
-            {"name": "Bad One (No ID)"} 
-        ],
+    # Page 1
+    resp1 = MagicMock()
+    resp1.status_code = 200
+    resp1.json.return_value = {
+        "data": [{"id": "c1", "name": "User 1"}],
         "has_more": True
     }
-    page2 = {
-        "data": [
-            {"id": "c2", "name": "Good Two"}
-        ],
+    
+    # Page 2
+    resp2 = MagicMock()
+    resp2.status_code = 200
+    resp2.json.return_value = {
+        "data": [{"id": "c2", "name": "User 2"}],
         "has_more": False
     }
     
-    mock_get.side_effect = [
-        MagicMock(status_code=200, json=lambda: page1, raise_for_status=lambda: None),
-        MagicMock(status_code=200, json=lambda: page2, raise_for_status=lambda: None)
-    ]
+    mock_client.get.side_effect = [resp1, resp2]
     
-    contacts = fetch_contacts()
+    get_stored = MagicMock(return_value=[])
+    results = fetch(get_stored)
     
-    # Should have 2 successfully mapped records
-    assert len(contacts) == 2
-    assert contacts[0]["external_id"] == "c1"
-    assert contacts[1]["external_id"] == "c2"
-    
-    # Verify mock was called with correct skip params
-    assert mock_get.call_count == 2
-    # First call skip=0
-    args0, kwargs0 = mock_get.call_args_list[0]
-    assert kwargs0["params"]["_skip"] == 0
-    # Second call skip=2 (total records in page 1 data)
-    args1, kwargs1 = mock_get.call_args_list[1]
-    assert kwargs1["params"]["_skip"] == 2
-
-@patch.dict("os.environ", {"CLOSE_API_KEY": "test-key"})
-@patch("httpx.Client.get")
-def test_fetch_contacts_auth_failure(mock_get):
-    mock_get.return_value = MagicMock(status_code=401)
-    
-    with pytest.raises(RuntimeError, match="authentication failed"):
-        fetch_contacts()
+    assert len(results) == 2
+    assert results[0]["data"]["external_id"] == "c1"
+    assert results[1]["data"]["external_id"] == "c2"
+    assert mock_client.get.call_count == 2
 
 @patch.dict("os.environ", {}, clear=True)
-def test_fetch_contacts_missing_credentials():
-    with pytest.raises(RuntimeError, match="CLOSE_API_KEY"):
-        fetch_contacts()
+def test_fetch_missing_credentials():
+    # Verify strict error message requirement
+    with pytest.raises(RuntimeError, match="Missing required environment variable: CLOSE_API_KEY"):
+        fetch(lambda x: [])
+
+@patch("src.integrations.close.httpx.Client")
+@patch.dict("os.environ", {"CLOSE_API_KEY": "test_key"})
+def test_fetch_auth_error(mock_client_class):
+    mock_client = MagicMock()
+    mock_client_class.return_value.__enter__.return_value = mock_client
+    
+    resp = MagicMock()
+    resp.status_code = 401
+    resp.text = "Unauthorized"
+    mock_client.get.return_value = resp
+    
+    with pytest.raises(RuntimeError, match="Authentication failed"):
+        fetch(lambda x: [])
+
+def test_public_api_interface():
+    """Verify the integration exports the expected host-discovery interface."""
+    import src.integrations.close as close_pkg
+    assert hasattr(close_pkg, "fetch")
+    assert callable(close_pkg.fetch)
+    assert hasattr(close_pkg, "DATA_TYPE")
+    assert close_pkg.DATA_TYPE == "contact"
+    assert "fetch" in close_pkg.__all__
+    assert "DATA_TYPE" in close_pkg.__all__

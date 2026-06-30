@@ -1,19 +1,24 @@
-# Copper Contact → IncomingContact mapping contract
+# Copper People → contact-data mapping contract
 
 The field-by-field contract for the pure mapping function of the Copper integration. The input is
 a dict shaped like one entry of the JSON array returned by the Copper People search API (see the
-`ContactRecord` schema in `resources/copper/openapi.yaml`). The output is an `IncomingContact` dict
-with exactly the keys listed below.
+`ContactRecord` schema in `resources/copper/openapi.yaml`). The output is a contact `data` dict —
+the conventional contact shape the host stores verbatim under the `data` of a `contact` record. It
+has exactly the keys listed below.
+
+The host does **not** validate this dict: there is no deduplication, no merging, and no required
+field. The mapping therefore maps best-effort and never raises for missing or malformed values —
+it simply emits the keys below, using `None` (or an empty string for `full_name`) where a value is
+absent.
 
 ## Field mapping rules
 
 | Output key | Source | Rule |
 |---|---|---|
 | `provider_id` | — | Always the literal string `copper`. |
-| `external_id` | `id` | Required — raise `ValueError` if missing or empty. The Copper `id` is a number; convert it to its string form. |
+| `external_id` | `id` | The record's `id`, rendered as its decimal string form, or `None` when missing. |
 | `full_name` | `name`, else `first_name` + `last_name` | See *full_name derivation* below. |
-| `primary_email` | first/primary entry of `emails[]` | See *primary_email validation* below. |
-| `phone` | first entry of `phone_numbers[]` | The `number` of the first `phone_numbers[]` entry that has a non-empty `number`; otherwise `None`. |
+| `primary_email` | first/primary entry of `emails[]` | See *primary_email* below. |
 | `job_title` | `title` | The `title` field, or `None` when missing or empty. |
 | `company_name` | `company_name` | The flat `company_name` string, or `None` when missing or empty. |
 | `custom_fields` | selected provenance fields | See *custom_fields rules* below. |
@@ -22,29 +27,22 @@ with exactly the keys listed below.
 
 - `external_id` is the record `id`. Copper returns `id` as a number, so it is rendered as its
   decimal string form (for example the number `27140442` becomes the string `"27140442"`).
-- A missing, null, or empty `id` raises `ValueError`.
+- A missing, null, or empty `id` maps to `None`. The mapping never raises for a missing id.
 
 ## full_name derivation
 
-`full_name` is derived by the first rule below that yields a non-empty value; if none do, the
-function raises `ValueError`, because `IncomingContact` requires a non-empty `full_name`.
+1. `full_name` is the `name` field when present and non-empty, with surrounding whitespace stripped.
+2. Otherwise it is `first_name` and `last_name` joined by a single space, each treated as empty when
+   null, with surrounding whitespace stripped.
+3. Otherwise it is an empty string. The mapping never raises for a missing name.
 
-1. The `name` field, with surrounding whitespace stripped — used when that value is non-empty.
-2. Otherwise `first_name` and `last_name` joined by a single space, each treated as empty when
-   null, with surrounding whitespace stripped — used when that joined value is non-empty.
-3. Otherwise raise `ValueError`.
-
-## primary_email validation
+## primary_email
 
 - `primary_email` is taken from the first entry of `emails[]` whose `email` value is non-empty
-  (the primary email), lowercased and trimmed, but only when it is a valid email address;
-  otherwise `None`.
+  (the primary email), lowercased and trimmed.
 - A missing or empty `emails[]` array, or one with no non-empty `email` value, maps to `None`.
-- A non-empty `email` that is not a valid email address also maps to `None` so the contact still
-  maps; a warning is logged naming the contact's `id`. This is **not** a record-skip.
-- Email validity is judged the same way the host judges it (the host's `email-validator` with
-  deliverability / DNS checks disabled, matching the host's email-typed field), so any value
-  emitted here is always accepted by the host's `IncomingContact` contract.
+- The value is passed through as-is otherwise; the host does not validate email format, so no
+  validity check is performed and no value is discarded.
 
 ## custom_fields rules
 
@@ -60,6 +58,6 @@ function raises `ValueError`, because `IncomingContact` requires a non-empty `fu
 
 ## Error contract
 
-- The function raises `ValueError` for exactly two conditions: a missing/empty `id`, or an
-  underivable `full_name` (rules above). Everything else maps without raising.
-- Callers (the integration's skip-and-log policy) treat a `ValueError` as "skip this one record".
+- The mapping function does not raise for record content — every input maps to an output dict.
+- Errors that are not per-record mapping concerns (missing credentials, authentication failure,
+  transport/HTTP errors) are raised by the `fetch(get_stored)` entry point, not by this function.

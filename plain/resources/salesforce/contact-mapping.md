@@ -20,7 +20,6 @@ absent.
 | `external_id` | `Id` | The record's `Id`, or `None` when missing. |
 | `full_name` | `Name`, else `FirstName` + `LastName` | See *full_name derivation* below. |
 | `primary_email` | `Email` | See *primary_email* below. |
-| `phone` | `Phone`, else `MobilePhone` | `Phone` when present and non-empty; otherwise `MobilePhone`; otherwise `None`. |
 | `job_title` | `Title` | The `Title` field, or `None` when missing or empty. |
 | `company_name` | `Account.Name` | The `Name` value of the nested `Account` object, or `None` when `Account` is null, missing, or has no non-empty name. |
 | `custom_fields` | all remaining fields | See *custom_fields rules* below. |

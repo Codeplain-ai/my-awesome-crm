@@ -1,75 +1,50 @@
-import pytest
-from src.integrations.dynamics.mapping import map_dynamics_contact
+from src.integrations.dynamics.mapping import map_contact
 
-def test_map_valid_contact_full():
-    raw = {
-        "contactid": "guid-123",
+def test_map_contact_full_name_preference():
+    source = {
+        "contactid": "guid-1",
         "fullname": "  John Doe  ",
-        "emailaddress1": "JOHN@Example.com",
-        "telephone1": "123-456",
-        "jobtitle": "Engineer",
-        "parentcustomerid_account": {"name": "Acme Corp"},
-        "other_field": "val",
-        "@odata.etag": "W/123"
+        "firstname": "John",
+        "lastname": "Doe"
     }
-    result = map_dynamics_contact(raw)
-    
-    assert result["provider_id"] == "dynamics"
-    assert result["external_id"] == "guid-123"
-    assert result["full_name"] == "John Doe"
-    assert result["primary_email"] == "john@example.com"
-    assert result["phone"] == "123-456"
-    assert result["job_title"] == "Engineer"
-    assert result["company_name"] == "Acme Corp"
-    assert result["custom_fields"] == {"other_field": "val"}
+    mapped = map_contact(source)
+    assert mapped["full_name"] == "John Doe"
 
-def test_map_full_name_derivation_from_parts():
-    raw = {
+def test_map_contact_name_fallback():
+    source = {
         "contactid": "guid-2",
+        "fullname": None,
         "firstname": "Jane",
         "lastname": "Smith"
     }
-    result = map_dynamics_contact(raw)
-    assert result["full_name"] == "Jane Smith"
+    mapped = map_contact(source)
+    assert mapped["full_name"] == "Jane Smith"
 
-def test_map_missing_id_raises_value_error():
-    raw = {"fullname": "No ID"}
-    with pytest.raises(ValueError, match="missing 'contactid'"):
-        map_dynamics_contact(raw)
+def test_map_contact_email_cleaning():
+    source = {
+        "contactid": "guid-3",
+        "emailaddress1": "  USER@Example.COM  "
+    }
+    mapped = map_contact(source)
+    assert mapped["primary_email"] == "user@example.com"
 
-def test_map_underivable_name_raises_value_error():
-    raw = {"contactid": "guid-3"}
-    with pytest.raises(ValueError, match="no derivable full_name"):
-        map_dynamics_contact(raw)
-
-def test_map_invalid_email_becomes_none():
-    raw = {
+def test_map_contact_company_expansion():
+    source = {
         "contactid": "guid-4",
-        "fullname": "Bad Email",
-        "emailaddress1": "not-an-email"
+        "parentcustomerid_account": {"name": "Acme Corp"}
     }
-    result = map_dynamics_contact(raw)
-    assert result["primary_email"] is None
-    # Rest of fields should still map
-    assert result["full_name"] == "Bad Email"
+    mapped = map_contact(source)
+    assert mapped["company_name"] == "Acme Corp"
 
-def test_map_phone_fallback():
-    raw = {
+def test_map_contact_custom_fields_filtering():
+    source = {
         "contactid": "guid-5",
-        "fullname": "Phone Test",
-        "mobilephone": "987-654"
+        "jobtitle": "Dev",
+        "favorite_color": "blue",
+        "@odata.etag": "123",
+        "other@odata.annotation": "abc"
     }
-    # telephone1 is missing, should use mobilephone
-    result = map_dynamics_contact(raw)
-    assert result["phone"] == "987-654"
-
-def test_map_odata_metadata_filtered():
-    raw = {
-        "contactid": "guid-6",
-        "fullname": "Metadata Test",
-        "@odata.context": "context",
-        "firstname@OData.Community.Display.V1.FormattedValue": "Jane",
-        "real_custom": "keep me"
-    }
-    result = map_dynamics_contact(raw)
-    assert result["custom_fields"] == {"real_custom": "keep me"}
+    mapped = map_contact(source)
+    assert mapped["custom_fields"] == {"favorite_color": "blue"}
+    assert "jobtitle" not in mapped["custom_fields"]
+    assert "@odata.etag" not in mapped["custom_fields"]

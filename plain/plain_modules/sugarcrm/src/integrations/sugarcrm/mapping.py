@@ -1,125 +1,85 @@
 import logging
-from typing import Any, Optional
-from email_validator import validate_email, EmailNotValidError
+from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
 
-def validate_and_normalize_email(email_str: Optional[str]) -> Optional[str]:
+def map_contact(raw: Dict[str, Any]) -> Dict[str, Any]:
     """
-    Validates an email string using the same rules as the host.
-    Returns lowercased and trimmed email if valid, else None.
+    Implements :SugarCrmContactMapping: for a single SugarCRM Contact record.
+    Ref: [resource]resources/sugarcrm/contact-mapping.md
     """
-    if not email_str:
-        return None
-    
-    trimmed = email_str.strip()
-    if not trimmed:
-        return None
-
-    try:
-        # Check validity without deliverability/DNS checks per contract
-        email_info = validate_email(trimmed, check_deliverability=False)
-        return email_info.normalized.lower()
-    except EmailNotValidError:
-        return None
-
-def map_contact(raw: dict[str, Any]) -> dict[str, Any]:
-    """
-    Implements SugarCRM Contact -> IncomingContact mapping contract.
-    
-    Raises ValueError if:
-    - id is missing or empty.
-    - full_name cannot be derived.
-    """
-    # 1. Provider ID and External ID
-    external_id = raw.get("id")
-    if not external_id:
-        raise ValueError("SugarCRM record missing 'id'")
-    
-    # 2. Primary Email Selection
-    selected_email: Optional[str] = None
+    # 1. Primary Email Selection
+    email_val = None
     email_list = raw.get("email")
-    
-    if isinstance(email_list, list) and email_list:
-        # Try to find primary
-        for entry in email_list:
-            if entry.get("primary_address"):
-                selected_email = entry.get("email_address")
-                break
-        
-        # Fallback to first non-empty
-        if not selected_email:
-            for entry in email_list:
-                if entry.get("email_address"):
-                    selected_email = entry.get("email_address")
-                    break
-
-    # Fallback to email1
-    if not selected_email:
-        selected_email = raw.get("email1")
-
-    # 3. Email Validation
-    primary_email = validate_and_normalize_email(selected_email)
-    if selected_email and not primary_email:
-        logger.warning(
-            f"SugarCRM record '{external_id}' has invalid email address: {selected_email}"
+    if isinstance(email_list, list) and len(email_list) > 0:
+        # Find primary_address entry
+        primary_entry = next(
+            (e for e in email_list if e.get("primary_address") is True or str(e.get("primary_address")).lower() == "true"),
+            None
         )
+        if primary_entry:
+            email_val = primary_entry.get("email_address")
+        
+        # Fallback to first non-empty email_address if no primary
+        if not email_val:
+            email_val = next(
+                (e.get("email_address") for e in email_list if e.get("email_address")),
+                None
+            )
 
-    # 4. Full Name Derivation
-    full_name: Optional[str] = None
-    
+    # Fallback to flat email1 field
+    if not email_val:
+        email_val = raw.get("email1")
+
+    # Canonicalize email
+    primary_email = None
+    if email_val and isinstance(email_val, str):
+        stripped_email = email_val.strip()
+        if stripped_email:
+            primary_email = stripped_email.lower()
+
+    # 2. full_name Derivation
+    full_name = ""
     # Rule 1: full_name or name
-    fn_val = raw.get("full_name") or raw.get("name")
-    if fn_val and fn_val.strip():
-        full_name = fn_val.strip()
-    
-    # Rule 2: first + last
-    if not full_name:
-        first = (raw.get("first_name") or "").strip()
-        last = (raw.get("last_name") or "").strip()
+    fn_field = raw.get("full_name")
+    n_field = raw.get("name")
+    if fn_field and str(fn_field).strip():
+        full_name = str(fn_field).strip()
+    elif n_field and str(n_field).strip():
+        full_name = str(n_field).strip()
+    else:
+        # Rule 2: first + last
+        first = str(raw.get("first_name") or "").strip()
+        last = str(raw.get("last_name") or "").strip()
         joined = f"{first} {last}".strip()
         if joined:
             full_name = joined
-            
-    # Rule 3: primary email fallback
-    if not full_name and selected_email and selected_email.strip():
-        full_name = selected_email.strip()
-        
-    if not full_name:
-        raise ValueError(f"SugarCRM record '{external_id}' has no derivable full_name")
+        elif primary_email:
+            # Rule 3: primary_email trimmed
+            full_name = email_val.strip() if email_val else ""
 
-    # 5. Other fields
-    phone_work = raw.get("phone_work")
-    phone_mobile = raw.get("phone_mobile")
-    phone = (phone_work if phone_work and phone_work.strip() else phone_mobile)
-    if phone:
-        phone = phone.strip() or None
-    else:
-        phone = None
-
-    job_title = raw.get("title")
-    if job_title:
-        job_title = job_title.strip() or None
-    
-    company_name = raw.get("account_name")
-    if company_name:
-        company_name = company_name.strip() or None
-
-    # 6. Custom Fields
-    # Provenance fields copied verbatim
+    # 3. Custom Fields
+    # Rule: capture provenance timestamps, exclude business keys and API metadata (_)
+    business_keys = {
+        "id", "first_name", "last_name", "name", "full_name", 
+        "email", "email1", "phone_work", "phone_mobile", 
+        "title", "account_name"
+    }
     custom_fields = {}
-    for k in ["date_entered", "date_modified"]:
-        if raw.get(k) is not None:
-            custom_fields[k] = raw[k]
+    for k, v in raw.items():
+        if k in ("date_entered", "date_modified") and v is not None:
+            custom_fields[k] = v
+        elif k not in business_keys and not k.startswith("_"):
+            # Per contract: only date_entered/date_modified are explicitly listed 
+            # for inclusion, but we follow the exclusion rules for safety.
+            pass
 
-    # Return normalized IncomingContact dict
     return {
         "provider_id": "sugarcrm",
-        "external_id": str(external_id),
+        "external_id": raw.get("id"),
         "full_name": full_name,
         "primary_email": primary_email,
-        "phone": phone,
-        "job_title": job_title,
-        "company_name": company_name,
-        "custom_fields": custom_fields
+        "job_title": raw.get("title") or None,
+        "company_name": raw.get("account_name") or None,
+        "custom_fields": custom_fields,
     }

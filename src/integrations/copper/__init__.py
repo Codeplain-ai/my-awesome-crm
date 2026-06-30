@@ -1,63 +1,93 @@
+import os
 import logging
-import httpx
-from typing import Iterable, Any
-from .config import get_credentials
-from .mapping import map_copper_contact
+from typing import Any, Callable, List
 
-__all__ = ["fetch_contacts"]
+import httpx
+
+from .mapping import map_copper_person_to_contact
 
 logger = logging.getLogger(__name__)
 
-PAGE_SIZE = 200
-BASE_URL = "https://api.copper.com/developer_api/v1/people/search"
+# Integration Metadata
+DATA_TYPE = "contact"
+BASE_URL = "https://api.copper.com/developer_api/v1"
 
-def fetch_contacts() -> Iterable[dict[str, Any]]:
+__all__ = ["DATA_TYPE", "fetch"]
+
+
+def fetch(get_stored: Callable[[str], List[dict[str, Any]]]) -> List[dict[str, Any]]:
     """
-    Implementation of :CopperIntegration: fetch.
-    Walks pagination and yields mapped :IncomingContact: records.
+    Copper integration fetch entry point.
+    
+    Reads credentials from COPPER_API_KEY and COPPER_USER_EMAIL.
+    Walks the Copper People search API pages and maps results to host records.
     """
-    headers = get_credentials()
-    contacts = []
+    api_key = os.environ.get("COPPER_API_KEY")
+    user_email = os.environ.get("COPPER_USER_EMAIL")
+
+    if not api_key:
+        raise RuntimeError("Missing required Copper credential: COPPER_API_KEY")
+    if not user_email:
+        raise RuntimeError("Missing required Copper credential: COPPER_USER_EMAIL")
+
+    headers = {
+        "X-PW-AccessToken": api_key,
+        "X-PW-UserEmail": user_email,
+        "X-PW-Application": "developer_api",
+        "Content-Type": "application/json",
+    }
+
+    page_size = 200
     page_number = 1
+    all_records = []
 
-    with httpx.Client(headers=headers, timeout=30.0) as client:
+    # Use a single client for connection pooling across pages
+    with httpx.Client(timeout=60.0) as client:
         while True:
-            logger.info(f"Fetching Copper people page {page_number}")
+            logger.info(f"Fetching Copper People page {page_number}")
             
-            payload = {
-                "page_number": page_number,
-                "page_size": PAGE_SIZE
-            }
-            
-            response = client.post(BASE_URL, json=payload)
-            
-            # Propagate transport/auth/server errors per requirements
-            response.raise_for_status()
-            
-            records = response.json()
-            if not isinstance(records, list):
-                logger.error(f"Unexpected response format from Copper: {type(records)}")
-                break
+            try:
+                response = client.post(
+                    f"{BASE_URL}/people/search",
+                    headers=headers,
+                    json={
+                        "page_number": page_number,
+                        "page_size": page_size,
+                    },
+                )
+            except httpx.RequestError as exc:
+                raise RuntimeError(f"Network error while contacting Copper API: {str(exc)}") from exc
 
-            for record in records:
+            if response.status_code != 200:
                 try:
-                    mapped = map_copper_contact(record)
-                    contacts.append(mapped)
-                except ValueError as ve:
-                    # Skip-and-log policy for malformed records
-                    record_id = record.get("id", "unknown")
-                    logger.warning(
-                        f"Skipping malformed Copper record {record_id}: {str(ve)}",
-                        extra={"provider_id": "copper", "external_id": record_id, "error": str(ve)}
-                    )
+                    error_data = response.json()
+                    message = error_data.get("message", response.text)
                 except Exception:
-                    # Non-mapping errors should propagate
-                    raise
+                    message = response.text
+                
+                raise RuntimeError(
+                    f"Copper API error (status {response.status_code}): {message}. "
+                    f"Request: page_number={page_number}"
+                )
 
-            # Pagination check: stop if we got fewer records than requested
-            if len(records) < PAGE_SIZE:
+            batch = response.json()
+            if not isinstance(batch, list):
+                raise RuntimeError(
+                    f"Unexpected Copper API response format: expected list, got {type(batch).__name__}"
+                )
+
+            for person in batch:
+                mapped_contact = map_copper_person_to_contact(person)
+                all_records.append({
+                    "data_type": DATA_TYPE,
+                    "data": mapped_contact
+                })
+
+            # Pagination check: a page with fewer than page_size records is the final page.
+            if len(batch) < page_size:
+                logger.info(f"Reached end of Copper People data at page {page_number}")
                 break
             
             page_number += 1
 
-    return contacts
+    return all_records

@@ -34,7 +34,7 @@ paths:
       description: >
         Server is the login.microsoftonline.com authority with DYNAMICS_TENANT_ID
         in the path. The flow issues no refresh token; a fresh token is acquired
-        on every fetch_contacts() call.
+        on every fetch(get_stored) call.
       security: []
       requestBody:
         required: true
@@ -193,7 +193,7 @@ components:
         key (Dataverse's analogue of Salesforce's attributes envelope). Any selected
         field can be null except contactid. fullname/firstname/lastname can ALL be
         null on a live record (a nameless contact was found on the probed org), in
-        which case full_name is underivable and the record is skipped. emailaddress1
+        which case full_name falls back to an empty string. emailaddress1
         content is NOT guaranteed to be a valid email address.
       required: [contactid]
       properties:

@@ -1,1 +1,1 @@
-# Marks the directory as a Python package for pytest collection.
+# Marker for pytest

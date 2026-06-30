@@ -23,7 +23,6 @@ description: Shared concepts and tech-stack implementation reqs for the CRM host
   - external_id - the record's id in the source :Provider: (conventional)
   - full_name - human-readable display name (conventional)
   - primary_email - canonical email address (conventional)
-  - phone - free-form phone string (conventional)
   - job_title - free-form job title (conventional)
   - company_name - free-form company name (conventional)
   - custom_fields - free-form JSON object for fields that do not fit the shape above (conventional, defaults to empty object)

@@ -1,73 +1,55 @@
-import logging
-from typing import Any, Dict, Optional
-from email_validator import validate_email, EmailNotValidError
+from typing import Any, Dict, List
 
-logger = logging.getLogger(__name__)
-
-def map_close_contact(raw: Dict[str, Any]) -> Dict[str, Any]:
+def map_close_contact(source: Dict[str, Any]) -> Dict[str, Any]:
     """
-    Implements the CloseContactMapping contract.
-    Converts a raw Close contact dict into an IncomingContact dict.
+    Implements :CloseContactMapping: as defined in contact-mapping.md.
     """
-    external_id = raw.get("id")
-    if not external_id:
-        raise ValueError("Close record is missing 'id'")
-
-    # 1. Full Name derivation
-    name = (raw.get("name") or "").strip()
+    # 1. External IDs and Provider ID
+    external_id = source.get("id")
     
-    emails = raw.get("emails") or []
-    first_email_val = ""
-    if emails and isinstance(emails, list) and len(emails) > 0:
-        first_email_val = (emails[0].get("email") or "").strip()
-
-    full_name = ""
-    if name:
-        full_name = name
-    elif first_email_val:
-        full_name = first_email_val
+    # 2. Emails extraction
+    emails: List[Dict[str, Any]] = source.get("emails") or []
+    first_email_raw = ""
+    primary_email = None
     
+    if emails and isinstance(emails, list):
+        first_entry = emails[0]
+        if isinstance(first_entry, dict):
+            email_val = first_entry.get("email")
+            if email_val:
+                first_email_raw = str(email_val)
+                primary_email = first_email_raw.strip().lower()
+
+    # 3. full_name derivation
+    # Rule 1: The name value, trimmed
+    full_name = (source.get("name") or "").strip()
+    
+    # Rule 2: Otherwise the first emails[] entry's email value, trimmed
     if not full_name:
-        raise ValueError(f"Close record {external_id} has no derivable full_name")
-
-    # 2. Primary Email validation
-    primary_email: Optional[str] = None
-    if first_email_val:
-        try:
-            # check_deliverability=False as per requirements
-            valid = validate_email(first_email_val, check_deliverability=False)
-            primary_email = valid.normalized.lower()
-        except EmailNotValidError:
-            logger.warning(
-                f"Close contact {external_id} has invalid email format: {first_email_val}"
-            )
-            primary_email = None
-
-    # 3. Phone (first non-empty)
-    phone: Optional[str] = None
-    phones = raw.get("phones") or []
-    if phones and isinstance(phones, list):
-        for p in phones:
-            p_val = (p.get("phone") or "").strip()
-            if p_val:
-                phone = p_val
-                break
-
-    # 4. Job Title and Company
-    job_title = (raw.get("title") or "").strip() or None
+        full_name = first_email_raw.strip()
     
-    # company_name: the docs say it's on the record if available, 
-    # but based on mapping rules we check for a lead/org display name.
-    # OpenApi shows 'display_name' is derived from 'name', we'll check if a 
-    # specific 'company' or similar field exists but mapping says "parent lead/org name".
-    # In Close, the 'lead_id' is the primary link.
-    company_name = (raw.get("company_name") or "").strip() or None
+    # Rule 3: Otherwise an empty string (already handled by default)
 
-    # 5. Custom Fields (provenance)
-    # Mapping rules: lead_id, organization_id, date_created, date_updated
+    # 4. Job Title
+    job_title = (source.get("title") or "").strip() or None
+
+    # 5. Company Name (Parent Lead/Org Name)
+    # The requirement states "lead or organization display name if available on the record"
+    # In Close Contact records, 'display_name' is a Close-generated field often for the contact,
+    # but the mapping spec specifically notes "lead or organization display name".
+    # Since we don't have the Lead object, we look for 'company_name' if it exists or 
+    # use the contact's 'display_name' as a best-effort fallback if appropriate, 
+    # but the spec suggests looking for parent info.
+    # Given the openapi.yaml, we don't see a 'lead_name' field, so we return None 
+    # unless a field like 'company' or similar is present (not in schema).
+    # Re-reading: "the lead or organization display name if available on the record".
+    company_name = source.get("company_name") or source.get("organization_name") or None
+
+    # 6. custom_fields
+    # Capture lead_id, organization_id, date_created, date_updated
     custom_fields = {}
     for field in ["lead_id", "organization_id", "date_created", "date_updated"]:
-        val = raw.get(field)
+        val = source.get(field)
         if val is not None:
             custom_fields[field] = val
 
@@ -76,7 +58,6 @@ def map_close_contact(raw: Dict[str, Any]) -> Dict[str, Any]:
         "external_id": external_id,
         "full_name": full_name,
         "primary_email": primary_email,
-        "phone": phone,
         "job_title": job_title,
         "company_name": company_name,
         "custom_fields": custom_fields

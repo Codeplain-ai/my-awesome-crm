@@ -1,46 +1,37 @@
+from typing import Any, Callable, List
 import logging
-import os
-from typing import Iterable, Any
 from .client import NimbleClient
-from .mapper import map_nimble_contact
+from .mapping import map_contact
 
 logger = logging.getLogger(__name__)
 
-__all__ = ["fetch_contacts"]
+# The default data type for this integration
+DATA_TYPE = "contact"
 
-def fetch_contacts() -> Iterable[dict[str, Any]]:
-    """
-    Orchestrates the Nimble integration: fetches person records from the API,
-    maps them to IncomingContact format, and applies skip-and-log policy.
-    """
-    token = os.environ.get("NIMBLE_ACCESS_TOKEN")
-    if not token:
-        logger.error("NIMBLE_ACCESS_TOKEN environment variable is not set")
-        raise RuntimeError("Missing NIMBLE_ACCESS_TOKEN")
+# Public API for the host discovery service
+__all__ = ["fetch", "DATA_TYPE"]
 
-    client = NimbleClient(access_token=token)
+
+def fetch(get_stored: Callable[[str], List[dict[str, Any]]]) -> List[dict[str, Any]]:
+    """
+    Fetches person contacts from Nimble and maps them to the host's Contact format.
+    """
+    # Validation of credentials happens during client init per implementation reqs
+    client = NimbleClient()
+    results = []
     
     try:
-        for raw_record in client.list_person_contacts():
-            try:
-                mapped = map_nimble_contact(raw_record)
-                yield mapped
-            except ValueError as ve:
-                # Per contact-mapping.md Error contract and skip-and-log policy
-                record_id = raw_record.get("id", "unknown")
-                logger.warning(
-                    f"Skipping Nimble record {record_id} due to mapping error: {ve}",
-                    extra={
-                        "provider_id": "nimble",
-                        "external_id": record_id,
-                        "error": str(ve)
-                    }
-                )
-                continue
+        # We only fetch "person" records as per requirements
+        for raw_contact in client.list_all_contacts(record_type="person"):
+            mapped_data = map_contact(raw_contact)
+            results.append({
+                "data_type": DATA_TYPE,
+                "data": mapped_data
+            })
+            
+        logger.info(f"Nimble integration successfully fetched {len(results)} contacts.")
     except Exception as e:
-        logger.error(
-            "Fatal error during Nimble ingestion",
-            extra={"error": str(e)},
-            exc_info=True
-        )
+        logger.error(f"Nimble integration failed during fetch: {str(e)}", exc_info=True)
         raise
+        
+    return results

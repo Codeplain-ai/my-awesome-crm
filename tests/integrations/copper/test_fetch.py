@@ -1,75 +1,73 @@
 import pytest
-from unittest.mock import MagicMock, patch
-import httpx
-from src.integrations.copper import fetch_contacts
+import os
+from unittest.mock import patch, MagicMock
+import src.integrations.copper
+from src.integrations.copper import fetch
 
-def test_fetch_contacts_pagination(monkeypatch):
-    """Tests multi-page pagination and data aggregation."""
-    monkeypatch.setenv("COPPER_API_KEY", "test-key")
-    monkeypatch.setenv("COPPER_USER_EMAIL", "test@example.com")
 
-    # Mock first page (full)
-    page1_data = [{"id": i, "name": f"User {i}"} for i in range(1, 201)]
-    # Mock second page (partial)
-    page2_data = [{"id": 201, "name": "User 201"}]
+def test_integration_exports():
+    """Verify the integration exports the required host interface."""
+    assert hasattr(src.integrations.copper, "fetch")
+    assert callable(src.integrations.copper.fetch)
+    assert hasattr(src.integrations.copper, "DATA_TYPE")
+    assert src.integrations.copper.DATA_TYPE == "contact"
+    assert "fetch" in src.integrations.copper.__all__
+    assert "DATA_TYPE" in src.integrations.copper.__all__
 
-    mock_resp1 = MagicMock(spec=httpx.Response)
-    mock_resp1.status_code = 200
-    mock_resp1.json.return_value = page1_data
 
-    mock_resp2 = MagicMock(spec=httpx.Response)
-    mock_resp2.status_code = 200
-    mock_resp2.json.return_value = page2_data
-
-    with patch("httpx.Client.post") as mock_post:
-        mock_post.side_effect = [mock_resp1, mock_resp2]
-        
-        results = fetch_contacts()
-        assert len(results) == 201
-        assert results[0]["external_id"] == "1"
-        assert results[200]["external_id"] == "201"
-        assert mock_post.call_count == 2
-
-def test_fetch_contacts_skip_and_log(monkeypatch, caplog):
-    """Tests that a page with one bad record yields good ones and logs a warning."""
-    monkeypatch.setenv("COPPER_API_KEY", "test-key")
-    monkeypatch.setenv("COPPER_USER_EMAIL", "test@example.com")
-
-    # One good record, one missing name (ValueError)
-    records = [
-        {"id": 100, "name": "Good User"},
-        {"id": 101, "name": ""} 
-    ]
-
-    mock_resp = MagicMock(spec=httpx.Response)
-    mock_resp.status_code = 200
-    mock_resp.json.return_value = records
-
-    with patch("httpx.Client.post", return_value=mock_resp):
-        results = fetch_contacts()
+@patch("httpx.Client")
+@patch.dict("os.environ", {"COPPER_API_KEY": "test_key", "COPPER_USER_EMAIL": "test@example.com"})
+def test_fetch_pagination_multi_page(mock_client_class):
+    """Verifies that fetch correctly iterates through pages until a partial page is found."""
+    mock_client = MagicMock()
+    mock_client_class.return_value.__enter__.return_value = mock_client
     
-    assert len(results) == 1
-    assert results[0]["external_id"] == "100"
-    assert "Skipping malformed Copper record 101" in caplog.text
+    # Page 1: 200 records (Full)
+    page1 = [{"id": i} for i in range(200)]
+    # Page 2: 10 records (Partial)
+    page2 = [{"id": i + 200} for i in range(10)]
+    
+    resp1 = MagicMock()
+    resp1.status_code = 200
+    resp1.json.return_value = page1
+    
+    resp2 = MagicMock()
+    resp2.status_code = 200
+    resp2.json.return_value = page2
+    
+    mock_client.post.side_effect = [resp1, resp2]
+    
+    # get_stored is ignored by Copper integration, but required by signature
+    results = fetch(lambda x: [])
+    
+    assert len(results) == 210
+    assert mock_client.post.call_count == 2
+    
+    # Verify request body for second page
+    last_call_args = mock_client.post.call_args_list[1]
+    assert last_call_args.kwargs["json"]["page_number"] == 2
 
-def test_fetch_contacts_missing_creds(monkeypatch):
-    """Tests that missing credentials raise RuntimeError."""
-    monkeypatch.delenv("COPPER_API_KEY", raising=False)
-    with pytest.raises(RuntimeError, match="COPPER_API_KEY"):
-        fetch_contacts()
+@patch.dict("os.environ", {}, clear=True)
+def test_fetch_missing_api_key():
+    with pytest.raises(RuntimeError, match="Missing required Copper credential: COPPER_API_KEY"):
+        fetch(lambda x: [])
 
-def test_fetch_contacts_auth_failure(monkeypatch):
-    """Tests that 401 Unauthorized propagates."""
-    monkeypatch.setenv("COPPER_API_KEY", "wrong")
-    monkeypatch.setenv("COPPER_USER_EMAIL", "test@example.com")
+@patch.dict("os.environ", {"COPPER_API_KEY": "key"}, clear=True)
+def test_fetch_missing_user_email():
+    with pytest.raises(RuntimeError, match="Missing required Copper credential: COPPER_USER_EMAIL"):
+        fetch(lambda x: [])
 
-    mock_resp = MagicMock(spec=httpx.Response)
-    mock_resp.status_code = 401
-    # raise_for_status is what fetch_contacts calls
-    mock_resp.raise_for_status.side_effect = httpx.HTTPStatusError(
-        "401 Unauthorized", request=MagicMock(), response=mock_resp
-    )
-
-    with patch("httpx.Client.post", return_value=mock_resp):
-        with pytest.raises(httpx.HTTPStatusError):
-            fetch_contacts()
+@patch("httpx.Client")
+@patch.dict("os.environ", {"COPPER_API_KEY": "k", "COPPER_USER_EMAIL": "e"})
+def test_fetch_api_error_propagation(mock_client_class):
+    mock_client = MagicMock()
+    mock_client_class.return_value.__enter__.return_value = mock_client
+    
+    error_resp = MagicMock()
+    error_resp.status_code = 401
+    error_resp.json.return_value = {"message": "Invalid API Key"}
+    error_resp.content = b'{"message": "Invalid API Key"}'
+    mock_client.post.return_value = error_resp
+    
+    with pytest.raises(RuntimeError, match="Copper API error \(status 401\): Invalid API Key"):
+        fetch(lambda x: [])

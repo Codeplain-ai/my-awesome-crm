@@ -1,12 +1,18 @@
-# Nimble Contact → IncomingContact mapping contract
+# Nimble Contact → contact-data mapping contract
 
 The field-by-field contract for the pure mapping function of the Nimble integration. The input is
 a dict shaped like one entry of the `resources[]` array returned by the Nimble REST API contacts
 list endpoint (see the `ContactRecord` schema in `resources/nimble/openapi.yaml`). Business data
 lives under the record's `fields` map, where each field key (e.g. `first name`, `last name`,
 `email`, `phone`, `title`, `company`) maps to an ARRAY of entry objects, each with a `value` (and
-optional `modifier`/`group`/`label`). The output is an `IncomingContact` dict with exactly the keys
-listed below.
+optional `modifier`/`group`/`label`). The output is a contact `data` dict — the conventional
+contact shape the host stores verbatim under the `data` of a `contact` record. It has exactly the
+keys listed below.
+
+The host does **not** validate this dict: there is no deduplication, no merging, and no required
+field. The mapping therefore maps best-effort and never raises for missing or malformed values —
+it simply emits the keys below, using `None` (or an empty string for `full_name`) where a value is
+absent.
 
 ## Reading a field value
 
@@ -20,18 +26,17 @@ after trimming. The integration never reads beyond the first entry of a field's 
 | Output key | Source | Rule |
 |---|---|---|
 | `provider_id` | — | Always the literal string `nimble`. |
-| `external_id` | `id` | Required — raise `ValueError` if missing or empty. |
+| `external_id` | `id` | The record's `id`, or `None` when missing. |
 | `full_name` | first value of `fields["first name"]` + first value of `fields["last name"]` | See *full_name derivation* below. |
-| `primary_email` | first value of `fields["email"]` | See *primary_email validation* below. |
-| `phone` | first value of `fields["phone"]` | The first `phone` entry value when present and non-empty; otherwise `None`. |
+| `primary_email` | first value of `fields["email"]` | See *primary_email* below. |
 | `job_title` | first value of `fields["title"]` | The first `title` entry value, or `None` when missing or empty. |
 | `company_name` | first value of `fields["company"]` | The first `company` entry value, or `None` when missing or empty. |
 | `custom_fields` | selected provenance fields | See *custom_fields rules* below. |
 
 ## full_name derivation
 
-`full_name` is derived by the first rule below that yields a non-empty value; if none do, the
-function raises `ValueError`, because `IncomingContact` requires a non-empty `full_name`.
+`full_name` is derived by the first rule below that yields a non-empty value; if none do, it is an
+empty string. The mapping never raises for a missing name.
 
 1. The first value of `fields["first name"]` and the first value of `fields["last name"]` joined by
    a single space, each treated as empty when missing or null, with surrounding whitespace stripped
@@ -39,20 +44,14 @@ function raises `ValueError`, because `IncomingContact` requires a non-empty `fu
 2. Otherwise the first value of `fields["email"]`, trimmed — used when non-empty. (Nimble contacts
    are commonly identified by email when no name is recorded.)
 3. Otherwise the first value of `fields["company"]`, trimmed — used when non-empty.
-4. Otherwise raise `ValueError`.
+4. Otherwise an empty string.
 
-## primary_email validation
+## primary_email
 
-- `primary_email` is the first value of `fields["email"]`, lowercased and trimmed, but only when it
-  is a valid email address; otherwise `None`.
+- `primary_email` is the first value of `fields["email"]`, lowercased and trimmed.
 - A missing or empty `email` maps to `None`.
-- A non-empty `email` that is not a valid email address also maps to `None` so the contact still
-  maps; a warning is logged naming the contact's `id`. This is **not** a record-skip.
-- Email validity is judged the same way the host judges it (the host's `email-validator` with
-  deliverability / DNS checks disabled, matching the host's email-typed field), so any value
-  emitted here is always accepted by the host's `IncomingContact` contract.
-- Note: when `email` is used as the `full_name` fallback (a name-less contact) but is not a valid
-  email address, `full_name` still takes the raw email string while `primary_email` is `None`.
+- The value is passed through as-is otherwise; the host does not validate email format, so no
+  validity check is performed and no value is discarded.
 
 ## custom_fields rules
 
@@ -64,6 +63,6 @@ function raises `ValueError`, because `IncomingContact` requires a non-empty `fu
 
 ## Error contract
 
-- The function raises `ValueError` for exactly two conditions: a missing/empty `id`, or an
-  underivable `full_name` (rules above). Everything else maps without raising.
-- Callers (the integration's skip-and-log policy) treat a `ValueError` as "skip this one record".
+- The mapping function does not raise for record content — every input maps to an output dict.
+- Errors that are not per-record mapping concerns (missing credentials, authentication failure,
+  transport/HTTP errors) are raised by the `fetch(get_stored)` entry point, not by this function.

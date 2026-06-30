@@ -57,7 +57,7 @@ paths:
         Server is the ZOHO_ACCOUNTS_HOST host. The request body is
         form-url-encoded. The flow returns a new access_token valid for about
         an hour plus the api_domain to use for data calls; a fresh access token
-        is acquired on every fetch_contacts() call.
+        is acquired on every fetch(get_stored) call.
       security: []
       requestBody:
         required: true

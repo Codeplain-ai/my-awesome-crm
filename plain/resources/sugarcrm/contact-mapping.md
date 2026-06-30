@@ -1,34 +1,37 @@
-# SugarCRM Contact → IncomingContact mapping contract
+# SugarCRM Contact → contact-data mapping contract
 
-The field-by-field contract for the pure mapping function of the SugarCRM integration. The input is
-a dict shaped like one entry of the `records[]` array returned by the SugarCRM REST `GET /Contacts`
-list endpoint (see the `ContactRecord` schema in `resources/sugarcrm/openapi.yaml`). The output is an
-`IncomingContact` dict with exactly the keys listed below.
+The field-by-field contract for the pure mapping function of the SugarCRM integration. The input
+is a dict shaped like one entry of the `records[]` array returned by the SugarCRM REST
+`GET /Contacts` list endpoint (see the `ContactRecord` schema in
+`resources/sugarcrm/openapi.yaml`). The output is a contact `data` dict — the conventional contact
+shape the host stores verbatim under the `data` of a `contact` record. It has exactly the keys
+listed below.
+
+The host does **not** validate this dict: there is no deduplication, no merging, and no required
+field. The mapping therefore maps best-effort and never raises for missing or malformed values —
+it simply emits the keys below, using `None` (or an empty string for `full_name`) where a value is
+absent.
 
 ## Field mapping rules
 
 | Output key | Source | Rule |
 |---|---|---|
 | `provider_id` | — | Always the literal string `sugarcrm`. |
-| `external_id` | `id` | Required — raise `ValueError` if missing or empty. |
+| `external_id` | `id` | The record's `id`, or `None` when missing. |
 | `full_name` | `full_name` / `name`, else `first_name` + `last_name`, else the primary email | See *full_name derivation* below. |
-| `primary_email` | the primary entry of the `email` array, else `email1` | See *primary_email validation* below. |
-| `phone` | `phone_work`, else `phone_mobile` | `phone_work` when present and non-empty; otherwise `phone_mobile`; otherwise `None`. |
+| `primary_email` | the primary entry of the `email` array, else `email1` | See *primary_email* below. |
 | `job_title` | `title` | The `title` field, or `None` when missing or empty. |
 | `company_name` | `account_name` | The flat `account_name` string, or `None` when missing or empty. |
 | `custom_fields` | provenance fields | See *custom_fields rules* below. |
 
 ## full_name derivation
 
-`full_name` is derived by the first rule below that yields a non-empty value; if none do, the
-function raises `ValueError`, because `IncomingContact` requires a non-empty `full_name`.
-
-1. `full_name` when present and non-empty, with surrounding whitespace stripped; otherwise `name`
-   when present and non-empty, stripped.
-2. Otherwise `first_name` and `last_name` joined by a single space, each treated as empty when null,
-   with surrounding whitespace stripped — used when that joined value is non-empty.
-3. Otherwise the selected primary email value, trimmed — used when non-empty.
-4. Otherwise raise `ValueError`.
+1. `full_name` is the `full_name` field when present and non-empty, with surrounding whitespace
+   stripped; otherwise `name` when present and non-empty, stripped.
+2. Otherwise it is `first_name` and `last_name` joined by a single space, each treated as empty when
+   null, with surrounding whitespace stripped — used when that joined value is non-empty.
+3. Otherwise it is the selected primary email value, trimmed — used when non-empty.
+4. Otherwise it is an empty string. The mapping never raises for a missing name.
 
 ## primary_email selection
 
@@ -36,21 +39,13 @@ function raises `ValueError`, because `IncomingContact` requires a non-empty `fu
   `primary_address` is truthy; if no entry is marked primary, the `email_address` of the first entry
   that has a non-empty `email_address`.
 - If the `email` array yields nothing usable, fall back to the flat `email1` field.
-- This selected value then goes through *primary_email validation* below.
 
-## primary_email validation
+## primary_email
 
-- `primary_email` is the selected email value, lowercased and trimmed, but only when it is a valid
-  email address; otherwise `None`.
+- `primary_email` is the selected email value, lowercased and trimmed.
 - A missing or empty selected email maps to `None`.
-- A non-empty selected email that is not a valid email address also maps to `None` so the contact
-  still maps; a warning is logged naming the contact's `id`. This is **not** a record-skip.
-- Email validity is judged the same way the host judges it (the host's `email-validator` with
-  deliverability / DNS checks disabled, matching the host's email-typed field), so any value
-  emitted here is always accepted by the host's `IncomingContact` contract.
-- Note: when the selected email is used as the `full_name` fallback (a contact with no name) but is
-  not a valid email address, `full_name` still takes the raw email string while `primary_email` is
-  `None`.
+- The value is passed through as-is otherwise; the host does not validate email format, so no
+  validity check is performed and no value is discarded.
 
 ## custom_fields rules
 
@@ -64,6 +59,6 @@ function raises `ValueError`, because `IncomingContact` requires a non-empty `fu
 
 ## Error contract
 
-- The function raises `ValueError` for exactly two conditions: a missing/empty `id`, or an
-  underivable `full_name` (rules above). Everything else maps without raising.
-- Callers (the integration's skip-and-log policy) treat a `ValueError` as "skip this one record".
+- The mapping function does not raise for record content — every input maps to an output dict.
+- Errors that are not per-record mapping concerns (missing credentials, authentication failure,
+  transport/HTTP errors) are raised by the `fetch(get_stored)` entry point, not by this function.

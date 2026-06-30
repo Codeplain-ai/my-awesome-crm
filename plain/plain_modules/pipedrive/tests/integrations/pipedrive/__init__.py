@@ -1,1 +1,1 @@
-# Test package for Pipedrive integration
+# Empty init file to support pytest discovery

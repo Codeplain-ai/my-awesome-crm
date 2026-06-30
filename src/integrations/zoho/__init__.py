@@ -1,27 +1,48 @@
-import logging
-from .mapper import map_zoho_contact
-from .client import get_credentials, get_access_token, fetch_raw_contacts
+import os
+from typing import Any, Callable, List, Dict
+from .client import ZohoClient
+from .mapping import map_contact
 
-logger = logging.getLogger(__name__)
+DATA_TYPE = "contact"
 
-__all__ = ["fetch_contacts"]
+__all__ = ["fetch", "DATA_TYPE"]
 
-def fetch_contacts() -> list[dict]:
+def fetch(get_stored: Callable[[str], List[Dict[str, Any]]]) -> List[Dict[str, Any]]:
     """
-    Integration entry point. Fetches contacts from Zoho CRM, 
-    maps them, and handles per-record failures.
+    Entry point for the Zoho integration.
+    Pulls Contacts from Zoho CRM and maps them to host-standard records.
     """
-    creds = get_credentials()
-    token = get_access_token(creds)
+    credentials = {}
+    required_vars = [
+        "ZOHO_ACCOUNTS_HOST",
+        "ZOHO_API_HOST",
+        "ZOHO_CLIENT_ID",
+        "ZOHO_CLIENT_SECRET",
+        "ZOHO_REFRESH_TOKEN",
+    ]
     
-    contacts = []
-    for raw_record in fetch_raw_contacts(creds, token):
-        try:
-            mapped = map_zoho_contact(raw_record)
-            contacts.append(mapped)
-        except ValueError as e:
-            record_id = raw_record.get("id", "unknown")
-            logger.warning(f"Skipping Zoho record {record_id} due to mapping error: {str(e)}")
-            continue
-            
-    return contacts
+    for var in required_vars:
+        val = os.environ.get(var)
+        if not val:
+            raise RuntimeError(var)
+        credentials[var] = val
+
+    client = ZohoClient(
+        accounts_host=credentials["ZOHO_ACCOUNTS_HOST"],
+        api_host=credentials["ZOHO_API_HOST"],
+        client_id=credentials["ZOHO_CLIENT_ID"],
+        client_secret=credentials["ZOHO_CLIENT_SECRET"],
+        refresh_token=credentials["ZOHO_REFRESH_TOKEN"],
+    )
+
+    raw_contacts = client.fetch_all_contacts()
+    
+    results = []
+    for raw in raw_contacts:
+        mapped_data = map_contact(raw)
+        results.append({
+            "data_type": "contact",
+            "data": mapped_data
+        })
+        
+    return results

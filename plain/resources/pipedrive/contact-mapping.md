@@ -1,54 +1,44 @@
-# Pipedrive Person → IncomingContact mapping contract
+# Pipedrive Person → contact-data mapping contract
 
 The field-by-field contract for the pure mapping function of the Pipedrive integration. The input
 is a dict shaped like one entry of the `data[]` array returned by the Pipedrive v1 `GET /v1/persons`
-list API (see the `ContactRecord` schema in `resources/pipedrive/openapi.yaml`). The output is an
-`IncomingContact` dict with exactly the keys listed below.
+list API (see the `ContactRecord` schema in `resources/pipedrive/openapi.yaml`). The output is a
+contact `data` dict — the conventional contact shape the host stores verbatim under the `data` of a
+`contact` record. It has exactly the keys listed below.
+
+The host does **not** validate this dict: there is no deduplication, no merging, and no required
+field. The mapping therefore maps best-effort and never raises for missing or malformed values —
+it simply emits the keys below, using `None` (or an empty string for `full_name`) where a value is
+absent.
 
 ## Field mapping rules
 
 | Output key | Source | Rule |
 |---|---|---|
 | `provider_id` | — | Always the literal string `pipedrive`. |
-| `external_id` | `id` | Required — raise `ValueError` if missing or empty. Stringified from the numeric Pipedrive id. |
+| `external_id` | `id` | The record's `id` stringified, or `None` when missing. |
 | `full_name` | `name`, else `first_name` + `last_name` | See *full_name derivation* below. |
-| `primary_email` | primary entry of `email[]` | See *primary_email validation* below. |
-| `phone` | primary entry of `phone[]` | See *phone derivation* below. |
+| `primary_email` | primary entry of `email[]` | See *primary_email* below. |
 | `job_title` | `job_title` | The `job_title` value, or `None` when missing or empty. |
 | `company_name` | `org_name`, else `org_id.name` | The flat `org_name` string when non-empty; otherwise the `name` of the nested `org_id` object; otherwise `None`. |
-| `custom_fields` | selected provenance fields | See *custom_fields rules* below. |
+| `custom_fields` | all remaining fields | See *custom_fields rules* below. |
 
 ## full_name derivation
 
-`full_name` is derived by the first rule below that yields a non-empty value; if none do, the
-function raises `ValueError`, because `IncomingContact` requires a non-empty `full_name`.
-
 1. `full_name` is the `name` field when present and non-empty, with surrounding whitespace stripped.
 2. Otherwise it is `first_name` and `last_name` joined by a single space, each treated as empty when
-   null, with surrounding whitespace stripped — used when that joined value is non-empty.
-3. Otherwise raise `ValueError`.
+   null, with surrounding whitespace stripped.
+3. Otherwise it is an empty string. The mapping never raises for a missing name.
 
-## primary_email validation
+## primary_email
 
-- `primary_email` is the chosen email value, lowercased and trimmed, but only when it is a valid
-  email address; otherwise `None`.
 - The chosen email value is the `value` of the `email[]` entry whose `primary` flag is true; if no
   entry is marked primary, it is the `value` of the first entry; if `email` is missing, null, or
   empty, the chosen email value is empty.
+- `primary_email` is that chosen email value, lowercased and trimmed.
 - A missing or empty chosen email value maps to `None`.
-- A non-empty chosen email value that is not a valid email address also maps to `None` so the
-  contact still maps; a warning is logged naming the contact's `id`. This is **not** a record-skip.
-- Email validity is judged the same way the host judges it (the host's `email-validator` with
-  deliverability / DNS checks disabled, matching the host's email-typed field), so any value
-  emitted here is always accepted by the host's `IncomingContact` contract.
-
-## phone derivation
-
-- `phone` is the `value` of the `phone[]` entry whose `primary` flag is true, when present and
-  non-empty.
-- Otherwise it is the `value` of the first `phone[]` entry, when present and non-empty.
-- Otherwise `None` (including when `phone` is missing, null, or empty).
-- The phone value is kept verbatim; no normalization is applied.
+- The value is passed through as-is otherwise; the host does not validate email format, so no
+  validity check is performed and no value is discarded.
 
 ## custom_fields rules
 
@@ -61,6 +51,6 @@ function raises `ValueError`, because `IncomingContact` requires a non-empty `fu
 
 ## Error contract
 
-- The function raises `ValueError` for exactly two conditions: a missing/empty `id`, or an
-  underivable `full_name` (rules above). Everything else maps without raising.
-- Callers (the integration's skip-and-log policy) treat a `ValueError` as "skip this one record".
+- The mapping function does not raise for record content — every input maps to an output dict.
+- Errors that are not per-record mapping concerns (missing credentials, authentication failure,
+  transport/HTTP errors) are raised by the `fetch(get_stored)` entry point, not by this function.

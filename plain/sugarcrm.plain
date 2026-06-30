@@ -2,14 +2,14 @@
 import:
   - crm_common
   - integration_testing
-description: "SugarCRM Integration plug-in for the consolidated CRM backend. Adds src/integrations/sugarcrm/ so that GET /ingest/sugarcrm pulls Contact records from a SugarCRM instance via the v11 REST API and persists them through the host's dedup pipeline."
+description: "SugarCRM Integration plug-in for the CRM backend. Adds src/integrations/sugarcrm/ so that GET /ingest/sugarcrm pulls Contact records from a SugarCRM instance via the v11 REST API and stores them as contact records in the host's generic record store."
 ---
 
 ***definitions***
 
-- :SugarCrmProvider: is the :Provider: identifier `sugarcrm` - the folder name `src/integrations/sugarcrm/` and the value used as `provider_id` on every :IncomingContact: this integration emits.
+- :SugarCrmProvider: is the :Provider: identifier `sugarcrm` - the folder name `src/integrations/sugarcrm/`, the `source` recorded on every :Record: this integration produces, and the `provider_id` value the mapping stamps on each :Contact:.
 
-- :SugarCrmIntegration: is the concrete :Integration: for :SugarCrmProvider: that pulls SugarCRM `Contacts` records and yields :IncomingContact: records.
+- :SugarCrmIntegration: is the concrete :Integration: for :SugarCrmProvider: that pulls SugarCRM `Contacts` records and produces :Contact: data dicts under the data_type `contact`.
 
 - :SugarCrmCredentials: are the :IntegrationCredentials: for :SugarCrmProvider:, used to authenticate against a SugarCRM instance via the OAuth 2.0 password-grant flow, read from environment variables.
   - `SUGARCRM_ENDPOINT` - the Sugar instance host, e.g. `https://your-instance.sugarondemand.com` (required)
@@ -20,29 +20,29 @@ description: "SugarCRM Integration plug-in for the consolidated CRM backend. Add
 
 - :SugarCrmRestAPI: is the exact SugarCRM v11 REST API surface this integration calls, defined by [resources/sugarcrm/openapi.yaml](resources/sugarcrm/openapi.yaml).
 
-- :SugarCrmContactMapping: is the field-by-field contract for converting one raw SugarCRM `Contacts` record into an :IncomingContact: dict, fully described in [resources/sugarcrm/contact-mapping.md](resources/sugarcrm/contact-mapping.md).
+- :SugarCrmContactMapping: is the field-by-field contract for converting one raw SugarCRM `Contacts` record into a :Contact: data dict, fully described in [resources/sugarcrm/contact-mapping.md](resources/sugarcrm/contact-mapping.md).
 
 ***test reqs***
 
 - :ConformanceTests: of :SugarCrmContactMapping: must generate dummy SugarCRM `Contacts` records based on the `ContactRecord` schema of :SugarCrmRestAPI: and map each one with :SugarCrmContactMapping:.
   - Every generated record must conform to the `ContactRecord` schema of :SugarCrmRestAPI:.
-  - Each mapped result must be a valid :IncomingContact: that follows the :SugarCrmContactMapping: contract.
-  - This is a pure-function check: it invokes :SugarCrmContactMapping: directly on the dummy records and must not call the live API or `fetch_contacts()`.
+  - Each mapped result must follow the :SugarCrmContactMapping: contract and the :Contact: data shape.
+  - This is a pure-function check: it invokes :SugarCrmContactMapping: directly on the dummy records and must not call the live API or `fetch(get_stored)`.
 
 ***functional specs***
 
 - Implement a function that implements :SugarCrmContactMapping: as a pure function within the integration package.
 
-- Implement :SugarCrmIntegration:'s `fetch_contacts()` entry point.
+- Implement :SugarCrmIntegration:'s `fetch(get_stored)` entry point.
+  - The entry point accepts the host's `get_stored` callback; this integration does not need to read already-stored records, so it may ignore the callback.
   - Read :SugarCrmCredentials: from environment variables. If any required variable is missing or empty, raise `RuntimeError` with a message naming the missing environment variable key (e.g. `SUGARCRM_ENDPOINT`).
   - Acquire an access token via the OAuth password-grant token endpoint of :SugarCrmRestAPI:, then send it in the `OAuth-Token` header on every data call as defined by :SugarCrmRestAPI:.
   - Request the first page of contacts from the contacts list endpoint of :SugarCrmRestAPI: with its pinned field list, pinned page size, and headers.
   - Read every subsequent page per the pagination envelope of :SugarCrmRestAPI: until all pages are read.
-  - For each record across all pages, map it with :SugarCrmContactMapping:.
-    - If mapping one record raises `ValueError`, skip that record and log a warning naming its `id`, then continue.
-  - Return the list of successfully mapped :IncomingContact: dicts.
+  - For each record across all pages, map it with :SugarCrmContactMapping: to a :Contact: data dict.
+  - Return the list of mapped :Contact: data dicts; the host stores them verbatim.
 
 - Wire :SugarCrmIntegration: into the host's runtime discovery surface.
-  - `src/integrations/sugarcrm/__init__.py` exposes the top-level callable `fetch_contacts` as the package's public entry point.
-    - The package's public API is declared as exactly `fetch_contacts`, for example through `__all__`.
+  - `src/integrations/sugarcrm/__init__.py` exposes the module-level `DATA_TYPE` set to `contact` and the top-level callable `fetch` as the package's public entry point.
+    - The package's public API is declared as exactly `DATA_TYPE` and `fetch`, for example through `__all__`.
     - Internal helper modules (such as a mapping module) are implementation details; `__init__.py` may import them, and they need not be removed from the package namespace.

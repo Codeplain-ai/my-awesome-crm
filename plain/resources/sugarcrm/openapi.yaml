@@ -22,13 +22,13 @@ info:
     token is acquired from /oauth2/token and then sent on every data call in the
     OAuth-Token request header (Sugar's own header name, not standard Bearer).
     The flow issues a refresh token, but the integration simply acquires a fresh
-    access token on every fetch_contacts() call.
+    access token on every fetch(get_stored) call.
 
     Dirty-data notes (inferred from docs; confirm on a live probe later): any
     selected field other than id may be null or empty; an email address stored
     on a contact is NOT guaranteed to be a syntactically valid email; a contact
     may have no usable name (first_name / last_name / name all empty), in which
-    case the mapping skips it per the host's non-empty full_name requirement.
+    case the mapping emits an empty full_name and stores the contact verbatim.
 servers:
   - url: "{SUGARCRM_ENDPOINT}/rest/v11"
     description: >
@@ -48,7 +48,7 @@ paths:
         Acquires an access token for the configured Sugar user. The integration
         sends grant_type=password with the connected-client credentials and the
         user's username/password. A fresh token is acquired on every
-        fetch_contacts() call; the refresh token is not used.
+        fetch(get_stored) call; the refresh token is not used.
       security: []
       requestBody:
         required: true

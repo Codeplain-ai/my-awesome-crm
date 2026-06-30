@@ -34,7 +34,7 @@ paths:
       summary: OAuth 2.0 client-credentials (server-to-server) token request
       description: >
         Server lives on the SALESFORCE_ENDPOINT login host. The flow issues no
-        refresh token; a fresh token is acquired on every fetch_contacts() call.
+        refresh token; a fresh token is acquired on every fetch(get_stored) call.
       security: []
       requestBody:
         required: true

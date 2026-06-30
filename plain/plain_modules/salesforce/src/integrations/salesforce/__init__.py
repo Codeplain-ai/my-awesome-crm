@@ -1,73 +1,36 @@
 from typing import Any, Callable, List
 
-# Integration metadata
-DATA_TYPE = "contact"
+from .mapping import map_account, map_contact
 
-import os
-import httpx
-from src.integrations.salesforce.mapping import map_contact
+__all__ = ["fetch"]
 
-__all__ = ["DATA_TYPE", "fetch"]
-
-def _get_credentials() -> tuple[str, str, str]:
-    """Reads credentials from environment or raises RuntimeError."""
-    keys = ["SALESFORCE_ENDPOINT", "SALESFORCE_CLIENT_ID", "SALESFORCE_CLIENT_SECRET"]
-    values = []
-    for key in keys:
-        val = os.environ.get(key)
-        if not val:
-            raise RuntimeError(key)
-        values.append(val)
-    return values[0], values[1], values[2]
 
 def fetch(get_stored: Callable[[str], List[dict[str, Any]]]) -> List[dict[str, Any]]:
     """
-    Fetches contacts from Salesforce using the REST API.
+    Primary entry point for the Salesforce integration.
+    Pulls Contacts and Accounts from Salesforce REST API.
     """
-    endpoint, client_id, client_secret = _get_credentials()
+    from .client import SalesforceClient
 
-    with httpx.Client(timeout=30.0) as client:
-        # 1. Acquire Token
-        token_url = f"{endpoint.rstrip('/')}/services/oauth2/token"
-        token_resp = client.post(
-            token_url,
-            data={
-                "grant_type": "client_credentials",
-                "client_id": client_id,
-                "client_secret": client_secret,
-            },
-        )
-        if token_resp.status_code != 200:
-            raise RuntimeError(f"Salesforce auth failed: {token_resp.text}")
-        
-        auth_data = token_resp.json()
-        access_token = auth_data["access_token"]
-        instance_url = auth_data["instance_url"].rstrip("/")
-        
-        headers = {
-            "Authorization": f"Bearer {access_token}",
-            "Accept": "application/json",
-        }
+    client = SalesforceClient()
+    
+    # 1. Fetch Contacts
+    contact_soql = (
+        "SELECT Id, Name, FirstName, LastName, Email, Phone, MobilePhone, "
+        "Title, Account.Name FROM Contact"
+    )
+    raw_contacts = client.query_all(contact_soql)
+    mapped_contacts = [
+        {"data_type": "contact", "data": map_contact(r)}
+        for r in raw_contacts
+    ]
 
-        # 2. Query Loop (Pagination)
-        records = []
-        # Initial query
-        query = "SELECT Id, Name, FirstName, LastName, Email, Phone, MobilePhone, Title, Account.Name FROM Contact"
-        next_url = f"{instance_url}/services/data/v60.0/query/?q={query}"
+    # 2. Fetch Accounts
+    account_soql = "SELECT Id, Name, Website, Phone, Industry FROM Account"
+    raw_accounts = client.query_all(account_soql)
+    mapped_accounts = [
+        {"data_type": "account", "data": map_account(r)}
+        for r in raw_accounts
+    ]
 
-        while next_url:
-            resp = client.get(next_url, headers=headers)
-            if resp.status_code != 200:
-                raise RuntimeError(f"Salesforce query failed: {resp.text}")
-            
-            page_data = resp.json()
-            records.extend(page_data.get("records", []))
-
-            if not page_data.get("done", True) and "nextRecordsUrl" in page_data:
-                # nextRecordsUrl is a relative path like /services/data/v60.0/query/01g...
-                next_url = f"{instance_url}{page_data['nextRecordsUrl']}"
-            else:
-                next_url = None
-
-        # 3. Map records
-        return [map_contact(r) for r in records]
+    return mapped_contacts + mapped_accounts

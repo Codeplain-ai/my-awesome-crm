@@ -1,1 +1,1 @@
-# Marks the directory as a package for pytest importlib mode.
+# Package marker for tests

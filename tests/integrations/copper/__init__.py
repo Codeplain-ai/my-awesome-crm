@@ -1,1 +1,1 @@
-# Copper Integration Tests
+# Package marker for copper integration tests

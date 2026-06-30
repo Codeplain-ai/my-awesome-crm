@@ -2,14 +2,14 @@
 import:
   - crm_common
   - integration_testing
-description: "Zoho CRM Integration plug-in for the consolidated CRM backend. Adds src/integrations/zoho/ so that GET /ingest/zoho pulls Contact records from a Zoho CRM org via the v3 REST API and persists them through the host's dedup pipeline."
+description: "Zoho CRM Integration plug-in for the CRM backend. Adds src/integrations/zoho/ so that GET /ingest/zoho pulls Contact records from a Zoho CRM org via the v3 REST API and stores them as contact records in the host's generic record store."
 ---
 
 ***definitions***
 
-- :ZohoProvider: is the :Provider: identifier `zoho` - the folder name `src/integrations/zoho/` and the value used as `provider_id` on every :IncomingContact: this integration emits.
+- :ZohoProvider: is the :Provider: identifier `zoho` - the folder name `src/integrations/zoho/`, the `source` recorded on every :Record: this integration produces, and the `provider_id` value the mapping stamps on each :Contact:.
 
-- :ZohoIntegration: is the concrete :Integration: for :ZohoProvider: that pulls Zoho CRM `Contacts` records and yields :IncomingContact: records.
+- :ZohoIntegration: is the concrete :Integration: for :ZohoProvider: that pulls Zoho CRM `Contacts` records and produces :Contact: data dicts under the data_type `contact`.
 
 - :ZohoCredentials: are the :IntegrationCredentials: for :ZohoProvider:, used to authenticate against a Zoho CRM org via the OAuth 2.0 refresh-token grant, read from environment variables.
   - `ZOHO_ACCOUNTS_HOST` - the region-specific Zoho Accounts host used for the token request, e.g. `https://accounts.zoho.com` (required)
@@ -20,30 +20,30 @@ description: "Zoho CRM Integration plug-in for the consolidated CRM backend. Add
 
 - :ZohoRestAPI: is the exact Zoho CRM v3 REST API surface this integration calls, defined by [resources/zoho/openapi.yaml](resources/zoho/openapi.yaml).
 
-- :ZohoContactMapping: is the field-by-field contract for converting one raw Zoho CRM `Contacts` record into an :IncomingContact: dict, fully described in [resources/zoho/contact-mapping.md](resources/zoho/contact-mapping.md).
+- :ZohoContactMapping: is the field-by-field contract for converting one raw Zoho CRM `Contacts` record into a :Contact: data dict, fully described in [resources/zoho/contact-mapping.md](resources/zoho/contact-mapping.md).
 
 ***test reqs***
 
 - :ConformanceTests: of :ZohoContactMapping: must generate dummy Zoho CRM `Contacts` records based on the `ContactRecord` schema of :ZohoRestAPI: and map each one with :ZohoContactMapping:.
   - Every generated record must conform to the `ContactRecord` schema of :ZohoRestAPI:.
-  - Each mapped result must be a valid :IncomingContact: that follows the :ZohoContactMapping: contract.
-  - This is a pure-function check: it invokes :ZohoContactMapping: directly on the dummy records and must not call the live API or `fetch_contacts()`.
+  - Each mapped result must follow the :ZohoContactMapping: contract and the :Contact: data shape.
+  - This is a pure-function check: it invokes :ZohoContactMapping: directly on the dummy records and must not call the live API or `fetch(get_stored)`.
 
 ***functional specs***
 
 - Implement a function that implements :ZohoContactMapping: as a pure function within the integration package.
 
-- Implement :ZohoIntegration:'s `fetch_contacts()` entry point.
+- Implement :ZohoIntegration:'s `fetch(get_stored)` entry point.
+  - The entry point accepts the host's `get_stored` callback; this integration does not need to read already-stored records, so it may ignore the callback.
   - Read :ZohoCredentials: from environment variables. If any required variable is missing or empty, raise `RuntimeError` with a message naming the missing environment variable key (e.g. `ZOHO_REFRESH_TOKEN`).
   - Acquire a bearer access token via the OAuth refresh-token grant of :ZohoRestAPI:, sent on subsequent calls as the `Zoho-oauthtoken` authorization scheme of :ZohoRestAPI:.
   - Request the first page of contacts from the Contacts list endpoint of :ZohoRestAPI: with its pinned fields list, pinned page size, and the authorization header.
   - Read every subsequent page per the pagination envelope of :ZohoRestAPI: until `info.more_records` is false.
   - Treat a 204 No Content (empty body) response as zero records for that request.
-  - For each record across all pages, map it with :ZohoContactMapping:.
-    - If mapping one record raises `ValueError`, skip that record and log a warning naming its `id`, then continue.
-  - Return the list of successfully mapped :IncomingContact: dicts.
+  - For each record across all pages, map it with :ZohoContactMapping: to a :Contact: data dict.
+  - Return the list of mapped :Contact: data dicts; the host stores them verbatim.
 
 - Wire :ZohoIntegration: into the host's runtime discovery surface.
-  - `src/integrations/zoho/__init__.py` exposes the top-level callable `fetch_contacts` as the package's public entry point.
-    - The package's public API is declared as exactly `fetch_contacts`, for example through `__all__`.
+  - `src/integrations/zoho/__init__.py` exposes the module-level `DATA_TYPE` set to `contact` and the top-level callable `fetch` as the package's public entry point.
+    - The package's public API is declared as exactly `DATA_TYPE` and `fetch`, for example through `__all__`.
     - Internal helper modules (such as a mapping module) are implementation details; `__init__.py` may import them, and they need not be removed from the package namespace.
