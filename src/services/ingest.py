@@ -69,8 +69,14 @@ def run_integration_service(session: Session, integration_name: str) -> dict[str
 
     The integration exposes a `fetch(get_stored)` callable. `get_stored` is a
     callback the integration may call with a data_type to read every row already
-    stored for that type. `fetch` returns a list of data payloads (dicts), which
-    the host stores verbatim under the integration's data_type.
+    stored for that type. `fetch` returns a list of records; each record is a
+    dict carrying a `data_type` and a `data` payload, so a single integration may
+    emit several kinds of record (e.g. both "contact" and "account"). The host
+    stores each `data` payload verbatim under its own `data_type`.
+
+    For backwards tolerance, a bare payload dict (no `data_type`/`data` keys) is
+    stored under the integration's module-level DATA_TYPE, falling back to
+    DEFAULT_DATA_TYPE.
 
     On each run the integration's previously-stored rows are replaced by its
     fresh output, so re-syncing is idempotent. There is no deduplication or
@@ -91,7 +97,7 @@ def run_integration_service(session: Session, integration_name: str) -> dict[str
     except (ImportError, AttributeError):
         raise ValueError(f"Unknown integration: {integration_name}")
 
-    data_type = getattr(module, "DATA_TYPE", DEFAULT_DATA_TYPE)
+    default_data_type = getattr(module, "DATA_TYPE", DEFAULT_DATA_TYPE)
     repo = RecordRepository(session)
 
     def get_stored(requested_type: str) -> list[dict[str, Any]]:
@@ -115,18 +121,27 @@ def run_integration_service(session: Session, integration_name: str) -> dict[str
 
         now = datetime.now(timezone.utc)
 
-        # Replace this integration's prior rows with its fresh output.
+        # Replace this integration's prior rows (all data_types) with its output.
         deleted = repo.delete_by_source(integration_name)
-        for payload in produced:
+        type_counts: dict[str, int] = {}
+        for item in produced:
+            if isinstance(item, dict) and "data_type" in item and "data" in item:
+                row_type = item["data_type"] or default_data_type
+                payload = item["data"]
+            else:
+                # Bare payload: store under the module default data_type.
+                row_type = default_data_type
+                payload = item
             session.add(
                 Record(
-                    data_type=data_type,
+                    data_type=row_type,
                     source=integration_name,
                     data=payload,
                     created_at=now,
                     updated_at=now,
                 )
             )
+            type_counts[row_type] = type_counts.get(row_type, 0) + 1
 
         session.commit()
     except Exception as e:
@@ -136,7 +151,7 @@ def run_integration_service(session: Session, integration_name: str) -> dict[str
 
     return {
         "integration": integration_name,
-        "data_type": data_type,
+        "data_types": type_counts,
         "fetched": len(produced),
         "stored": len(produced),
         "replaced": deleted,

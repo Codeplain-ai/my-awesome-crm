@@ -32,11 +32,12 @@ description: Shared concepts and tech-stack implementation reqs for the CRM host
   - One :Integration: corresponds to one :Provider: identifier, which is recorded as the `source` of every :Record: it produces.
   - The host logic that discovers integrations and invokes them in the ingest workflow is [ingest.py](../src/services/ingest.py) - imported from the host codebase; do not redefine or modify it.
   - Integrations are discovered from the filesystem at runtime - the :Integration: named "foo" lives in `src/integrations/foo/` and may consist of multiple files inside that folder.
-  - An :Integration: declares the kind of record it produces via a module-level `DATA_TYPE` string (e.g. "contact").
-  - Plug-in contract - the integration package `src/integrations/{name}/__init__.py` must expose the module-level `DATA_TYPE` and a top-level callable `fetch(get_stored)`.
+  - An :Integration: may produce records of one or more data_types; the data_type travels with each record, so a single integration can emit several kinds.
+  - Plug-in contract - the integration package `src/integrations/{name}/__init__.py` must expose a top-level callable `fetch(get_stored)`.
     - `get_stored` is a callback the host passes in; calling `get_stored(data_type)` returns every :Record: already stored for that data_type, regardless of source.
-    - `fetch(get_stored)` returns a list of dicts; the host stores each verbatim as the `data` of a :Record: row under the integration's `DATA_TYPE` and `source`.
-    - On each run the host first removes the integration's previously-stored rows, then inserts its fresh output, so re-syncing is idempotent.
+    - `fetch(get_stored)` returns a list of records; each record is a dict with a `data_type` string and a `data` object.
+    - The host stores each returned record as a :Record: row under its own `data_type` and the integration's `source`, storing the `data` object verbatim.
+    - On each run the host first removes all of the integration's previously-stored rows (across every data_type), then inserts its fresh output, so re-syncing is idempotent.
     - If the callable is missing or raises, the host treats the integration as failed for that ingest call - no partial writes are committed.
 
 ***implementation reqs***
@@ -86,14 +87,14 @@ description: Shared concepts and tech-stack implementation reqs for the CRM host
 
 - Every :Integration: lives at `src/integrations/<id>/` with its :UnitTests: at `tests/integrations/<id>/`, keyed by its unique :Provider: identifier `<id>`.
   - Each integration module defines exactly one :Provider: identifier; it is unique across all integrations.
-  - The only file contract is that `src/integrations/<id>/__init__.py` exports a module-level `DATA_TYPE` string and a top-level callable `fetch(get_stored)`.
-  - `fetch(get_stored)` returns a list of dicts, each stored verbatim by the host as the `data` of a :Record: row.
+  - The only file contract is that `src/integrations/<id>/__init__.py` exports a top-level callable `fetch(get_stored)`.
+  - `fetch(get_stored)` returns a list of records, each a dict with a `data_type` string and a `data` object; the host stores the `data` verbatim as a :Record: row of that data_type.
   - Any further internal organization of the package (helper modules, file names, how functions are split) is optional and left to each integration.
 
 - :UnitTests: of every :Integration: never make real network calls.
   - All credential/token acquisition and all provider HTTP access go through single indirection seams so :UnitTests: can monkey-patch / inject fakes without touching the HTTP library or the network.
   - The integration's mapping function must be tested with concrete sample provider payloads stored inline in the test files as Python dicts; no external fixtures.
-  - :UnitTests: must cover the `fetch(get_stored)` entry point: given a stubbed provider response and a `get_stored` callback, it returns the mapped record `data` dicts.
+  - :UnitTests: must cover the `fetch(get_stored)` entry point: given a stubbed provider response and a `get_stored` callback, it returns the mapped records, each tagged with its `data_type` and carrying the mapped `data`.
   - :UnitTests: must cover multi-page pagination: a first page carrying the provider's continuation marker followed by a final page without one, asserting records from both pages are returned.
 
 - :UnitTests: should be implemented using pytest.
