@@ -53,7 +53,7 @@ absent.
 - `custom_fields` captures the Streak provenance timestamps `creationTimestamp` and
   `lastSavedTimestamp` from the input record, each copied verbatim when present and non-null.
 - The consumed business keys (`key`, `fullName`, `givenName`, `familyName`, `emailAddresses`,
-  `phoneNumbers`, `title`) are not copied into `custom_fields`.
+  `title`) are not copied into `custom_fields`.
 - `teamKey`, `lastUpdatedTimestamp`, `other`, the social handles, `addresses`, and `photoUrl` are
   not copied into `custom_fields`.
 

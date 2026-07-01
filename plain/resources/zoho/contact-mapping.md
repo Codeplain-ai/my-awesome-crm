@@ -55,7 +55,7 @@ derived as follows:
 - `custom_fields` captures every field on the input dict that is not consumed above and is not Zoho
   system metadata, copied verbatim into a new dict (for example any extra business field returned in
   the record).
-- Consumed keys are `id`, `Full_Name`, `First_Name`, `Last_Name`, `Email`, `Phone`, `Mobile`,
+- Consumed keys are `id`, `Full_Name`, `First_Name`, `Last_Name`, `Email`,
   `Title`, and `Account_Name`.
 - The `Account_Name` lookup (in any of its shapes — object, string, or null) is treated as consumed
   and is not copied into `custom_fields`.

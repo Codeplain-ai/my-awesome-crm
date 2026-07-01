@@ -3,7 +3,7 @@
 The field-by-field contract for the pure mapping function of the Close integration. The input is a
 dict shaped like one entry of the `data[]` array returned by the Close contacts list API (see the
 `ContactRecord` schema in `resources/close/openapi.yaml`). A Close contact belongs to exactly one
-Lead and may carry multiple `emails[]` and `phones[]`. The output is a contact `data` dict — the
+Lead and may carry multiple `emails[]`. The output is a contact `data` dict — the
 conventional contact shape the host stores verbatim under the `data` of a `contact` record. It has
 exactly the keys listed below.
 
@@ -50,7 +50,7 @@ empty string. The mapping never raises for a missing name.
 - `custom_fields` captures the Close provenance fields `lead_id`, `organization_id`, `date_created`
   and `date_updated` from the input record, each copied verbatim when present and non-null.
 - `id` is never copied — it duplicates `external_id`.
-- The consumed business fields (`name`, `title`, `emails`, `phones`) are not copied into
+- The consumed business fields (`name`, `title`, `emails`) are not copied into
   `custom_fields`.
 - Presentation and audit fields (`display_name`, `created_by`, `updated_by`) are not copied into
   `custom_fields`.

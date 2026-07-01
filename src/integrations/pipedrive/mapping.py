@@ -57,13 +57,14 @@ def map_pipedrive_person_to_contact(person: Dict[str, Any]) -> Dict[str, Any]:
         company_name = None
 
     # 6. custom_fields
-    # Rule: capture everything not consumed (id, name, first_name, last_name, email, phone, job_title, org_id, org_name)
+    # Rule: capture everything not consumed (id, name, first_name, last_name, email, job_title, org_id, org_name).
+    # The 'phone' field Pipedrive returns on every person is explicitly discarded and never stored.
     consumed_keys = {
-        "id", "name", "first_name", "last_name", "email", 
-        "phone", "job_title", "org_id", "org_name"
+        "id", "name", "first_name", "last_name", "email",
+        "job_title", "org_id", "org_name"
     }
     custom_fields = {
-        k: v for k, v in person.items() if k not in consumed_keys
+        k: v for k, v in person.items() if k not in consumed_keys and k != "phone"
     }
 
     return {

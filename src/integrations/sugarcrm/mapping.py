@@ -61,8 +61,8 @@ def map_contact(raw: Dict[str, Any]) -> Dict[str, Any]:
     # 3. Custom Fields
     # Rule: capture provenance timestamps, exclude business keys and API metadata (_)
     business_keys = {
-        "id", "first_name", "last_name", "name", "full_name", 
-        "email", "email1", "phone_work", "phone_mobile", 
+        "id", "first_name", "last_name", "name", "full_name",
+        "email", "email1",
         "title", "account_name"
     }
     custom_fields = {}

@@ -47,7 +47,7 @@ class SalesforceClient:
         if not self.access_token or not self.instance_url:
             self.authenticate()
 
-        soql = "SELECT Id, Name, FirstName, LastName, Email, Phone, MobilePhone, Title, Account.Name FROM Contact"
+        soql = "SELECT Id, Name, FirstName, LastName, Email, Title, Account.Name FROM Contact"
         query_path = "/services/data/v60.0/query/"
         headers = {
             "Authorization": f"Bearer {self.access_token}",

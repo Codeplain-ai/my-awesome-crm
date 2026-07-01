@@ -119,7 +119,7 @@ paths:
           schema:
             type: string
             const: >-
-              id,first_name,last_name,name,full_name,email,email1,phone_work,phone_mobile,title,account_name
+              id,first_name,last_name,name,full_name,email,email1,title,account_name
         - name: max_num
           in: query
           required: true
@@ -241,10 +241,6 @@ components:
         email1:
           type: [string, "null"]
           description: Convenience flat field holding the primary email address.
-        phone_work:
-          type: [string, "null"]
-        phone_mobile:
-          type: [string, "null"]
         title:
           type: [string, "null"]
         account_name:

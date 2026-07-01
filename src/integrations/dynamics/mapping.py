@@ -24,8 +24,8 @@ def map_contact(source: Dict[str, Any]) -> Dict[str, Any]:
 
     # 4. custom_fields (Exclude consumed fields and OData metadata)
     consumed = {
-        "contactid", "fullname", "firstname", "lastname", 
-        "emailaddress1", "telephone1", "mobilephone", 
+        "contactid", "fullname", "firstname", "lastname",
+        "emailaddress1",
         "jobtitle", "parentcustomerid_account"
     }
     

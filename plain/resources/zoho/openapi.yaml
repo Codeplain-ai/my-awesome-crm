@@ -115,7 +115,7 @@ paths:
             on this endpoint; max 50). The integration pins exactly this list.
           schema:
             type: string
-            const: id,Full_Name,First_Name,Last_Name,Email,Phone,Mobile,Title,Account_Name
+            const: id,Full_Name,First_Name,Last_Name,Email,Title,Account_Name
         - name: per_page
           in: query
           required: true
@@ -238,10 +238,6 @@ components:
         Last_Name:
           type: [string, "null"]
         Email:
-          type: [string, "null"]
-        Phone:
-          type: [string, "null"]
-        Mobile:
           type: [string, "null"]
         Title:
           type: [string, "null"]

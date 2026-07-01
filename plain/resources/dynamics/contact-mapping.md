@@ -43,7 +43,7 @@ absent.
 - `custom_fields` captures every field on the input dict that is not consumed above and is not
   API metadata, copied verbatim into a new dict.
 - Consumed keys are `contactid`, `fullname`, `firstname`, `lastname`, `emailaddress1`,
-  `telephone1`, `mobilephone`, `jobtitle`, and `parentcustomerid_account`.
+  `jobtitle`, and `parentcustomerid_account`.
 - API metadata is any key beginning with `@odata.` (for example `@odata.etag`) and any OData
   annotation key (one containing `@`, such as `...@OData.Community.Display.V1.FormattedValue` or
   `...@Microsoft.Dynamics.CRM.*`); these are never copied.

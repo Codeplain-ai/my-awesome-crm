@@ -86,8 +86,8 @@ paths:
           schema:
             type: string
             const: >-
-              SELECT Id, Name, FirstName, LastName, Email, Phone, MobilePhone,
-              Title, Account.Name FROM Contact
+              SELECT Id, Name, FirstName, LastName, Email, Title,
+              Account.Name FROM Contact
         - name: Accept
           in: header
           required: true
@@ -208,10 +208,6 @@ components:
         LastName:
           type: [string, "null"]
         Email:
-          type: [string, "null"]
-        Phone:
-          type: [string, "null"]
-        MobilePhone:
           type: [string, "null"]
         Title:
           type: [string, "null"]

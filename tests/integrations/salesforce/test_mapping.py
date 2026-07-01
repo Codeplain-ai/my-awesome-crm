@@ -9,7 +9,6 @@ def test_map_contact_full_record():
         "LastName": "Doe",
         "Email": " JOHN.DOE@EXAMPLE.COM ",
         "Title": "Engineering Manager",
-        "Phone": "123-456",
         "Account": {
             "attributes": {"type": "Account"},
             "Name": "Acme Corp"
@@ -82,15 +81,11 @@ def test_map_contact_custom_fields_filtering():
     raw = {
         "Id": "123",
         "Name": "Name",
-        "Phone": "555",
-        "MobilePhone": "666",
         "OtherField": "Keep Me"
     }
     mapped = map_contact_record(raw)
-    # Consumed keys: Id, Name, FirstName, LastName, Email, Phone, MobilePhone, Title, Account
+    # Consumed keys: Id, Name, FirstName, LastName, Email, Title, Account
     assert "Id" not in mapped["custom_fields"]
-    assert "Phone" not in mapped["custom_fields"]
-    assert "MobilePhone" not in mapped["custom_fields"]
     assert mapped["custom_fields"]["OtherField"] == "Keep Me"
 
 import pytest

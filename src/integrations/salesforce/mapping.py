@@ -9,8 +9,6 @@ CONSUMED_KEYS = {
     "FirstName",
     "LastName",
     "Email",
-    "Phone",
-    "MobilePhone",
     "Title",
     "Account",
 }

@@ -4,7 +4,7 @@ The field-by-field contract for the pure mapping function of the Nimble integrat
 a dict shaped like one entry of the `resources[]` array returned by the Nimble REST API contacts
 list endpoint (see the `ContactRecord` schema in `resources/nimble/openapi.yaml`). Business data
 lives under the record's `fields` map, where each field key (e.g. `first name`, `last name`,
-`email`, `phone`, `title`, `company`) maps to an ARRAY of entry objects, each with a `value` (and
+`email`, `title`, `company`) maps to an ARRAY of entry objects, each with a `value` (and
 optional `modifier`/`group`/`label`). The output is a contact `data` dict — the conventional
 contact shape the host stores verbatim under the `data` of a `contact` record. It has exactly the
 keys listed below.
@@ -57,7 +57,7 @@ empty string. The mapping never raises for a missing name.
 
 - `custom_fields` captures the record-level `record_type` value when present and non-null, copied
   verbatim under the key `record_type`, so the contact's Nimble kind is preserved.
-- The consumed business field keys (`first name`, `last name`, `email`, `phone`, `title`,
+- The consumed business field keys (`first name`, `last name`, `email`, `title`,
   `company`) are not copied into `custom_fields`.
 - The `fields` map itself and the record-level `id` are not copied into `custom_fields`.
 

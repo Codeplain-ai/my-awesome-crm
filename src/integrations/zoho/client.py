@@ -58,7 +58,7 @@ class ZohoClient:
 
         url = f"{self.api_host}/crm/v3/Contacts"
         params = {
-            "fields": "id,Full_Name,First_Name,Last_Name,Email,Phone,Mobile,Title,Account_Name",
+            "fields": "id,Full_Name,First_Name,Last_Name,Email,Title,Account_Name",
             "per_page": 200,
             "page": page,
         }

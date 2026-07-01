@@ -14,7 +14,7 @@ info:
 
     Dirty-data notes (cannot be verified without live access, recorded as
     expected caveats): the email value of an emails[] entry is NOT guaranteed to
-    be a valid email address. emails[] and phones[] may be empty arrays. name and
+    be a valid email address. emails[] may be an empty array. name and
     title may be null or empty. Skip counts on the probed org are unknown until a
     live read-only probe is run with real credentials.
   version: v1
@@ -102,8 +102,8 @@ components:
       type: object
       description: >
         One Contact entry of data[]. A Contact belongs to exactly one Lead
-        (lead_id) and may carry multiple emails and phones. name and title may be
-        null or empty. emails[] and phones[] may be empty arrays. The email value
+        (lead_id) and may carry multiple emails. name and title may be
+        null or empty. emails[] may be an empty array. The email value
         of an emails[] entry is NOT guaranteed to be a valid email address.
       required: [id, lead_id]
       properties:
@@ -130,11 +130,6 @@ components:
           description: Email entries; may be empty.
           items:
             $ref: "#/components/schemas/ContactEmail"
-        phones:
-          type: array
-          description: Phone entries; may be empty.
-          items:
-            $ref: "#/components/schemas/ContactPhone"
         date_created:
           type: [string, "null"]
           description: Close record creation timestamp.
@@ -160,21 +155,6 @@ components:
           description: Category label, e.g. office, home, direct.
         is_unsubscribed:
           type: [boolean, "null"]
-      additionalProperties: true
-    ContactPhone:
-      type: object
-      description: One entry of phones[].
-      required: [phone]
-      properties:
-        phone:
-          type: [string, "null"]
-        type:
-          type: [string, "null"]
-          description: Category label, e.g. mobile, office, home, fax.
-        country:
-          type: [string, "null"]
-        phone_formatted:
-          type: [string, "null"]
       additionalProperties: true
     ErrorEnvelope:
       type: object

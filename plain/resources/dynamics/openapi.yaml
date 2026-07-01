@@ -87,7 +87,7 @@ paths:
             contact entity. The integration pins exactly this list.
           schema:
             type: string
-            const: contactid,fullname,firstname,lastname,emailaddress1,telephone1,mobilephone,jobtitle
+            const: contactid,fullname,firstname,lastname,emailaddress1,jobtitle
         - name: $expand
           in: query
           required: true
@@ -211,10 +211,6 @@ components:
         lastname:
           type: [string, "null"]
         emailaddress1:
-          type: [string, "null"]
-        telephone1:
-          type: [string, "null"]
-        mobilephone:
           type: [string, "null"]
         jobtitle:
           type: [string, "null"]

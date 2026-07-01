@@ -66,8 +66,8 @@ empty string. The mapping never raises for a missing name.
   verbatim when present and non-null.
 - The Sell provenance fields `created_at`, `updated_at`, `contact_id`, `parent_organization_id`,
   and `is_organization` are added when present and non-null, so provenance is not lost.
-- The consumed business keys (`id`, `name`, `first_name`, `last_name`, `email`, `phone`,
-  `mobile`, `title`, `organization_name`) are not copied into `custom_fields`.
+- The consumed business keys (`id`, `name`, `first_name`, `last_name`, `email`,
+  `title`, `organization_name`) are not copied into `custom_fields`.
 
 ## Error contract
 

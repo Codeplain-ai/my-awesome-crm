@@ -45,9 +45,11 @@ absent.
 - `custom_fields` captures every field on the input dict that is not consumed above and is not a
   record envelope field, copied verbatim into a new dict (for example provider-specific custom
   field keys Pipedrive returns).
-- Consumed keys are `id`, `name`, `first_name`, `last_name`, `email`, `phone`, `job_title`,
-  `org_id`, and `org_name`.
-- These consumed keys are never copied into `custom_fields`.
+- Consumed keys are `id`, `name`, `first_name`, `last_name`, `email`, `job_title`, `org_id`, and
+  `org_name`.
+- The `phone` field that Pipedrive returns on every person is explicitly discarded and is never
+  copied into `custom_fields`; the integration stores no phone data.
+- These consumed keys and the discarded `phone` field are never copied into `custom_fields`.
 
 ## Error contract
 

@@ -36,7 +36,7 @@ info:
     wins.
 
     Dirty-data notes (from the documented schema; unverified against a live
-    portal): emailAddresses and phoneNumbers are arrays that may be empty; an
+    portal): emailAddresses is an array that may be empty; an
     email value is NOT guaranteed to be a valid email address; givenName and
     familyName may both be absent (Streak requires only that a contact have a
     name OR at least one email address). Streak models organizations as separate
@@ -150,7 +150,7 @@ components:
     ContactRecord:
       type: object
       description: >
-        One Streak Contact. emailAddresses and phoneNumbers are arrays of plain
+        One Streak Contact. emailAddresses is an array of plain
         strings that may be empty. An email value is NOT guaranteed to be a
         valid email address. fullName, givenName and familyName may all be null
         or absent (Streak requires only a name OR at least one email, and the v2
@@ -175,11 +175,6 @@ components:
         emailAddresses:
           type: array
           description: Email addresses for the contact; may be empty; values may be invalid.
-          items:
-            type: string
-        phoneNumbers:
-          type: array
-          description: Phone numbers for the contact; may be empty.
           items:
             type: string
         title:

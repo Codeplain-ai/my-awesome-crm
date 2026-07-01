@@ -42,8 +42,7 @@ absent.
 
 - `custom_fields` captures every field on the input dict that is not consumed above and is not
   API metadata, copied verbatim into a new dict (for example `Department`).
-- Consumed keys are `Id`, `Name`, `FirstName`, `LastName`, `Email`, `Phone`, `MobilePhone`,
-  `Title`, and `Account`.
+- Consumed keys are `Id`, `Name`, `FirstName`, `LastName`, `Email`, `Title`, and `Account`.
 - API metadata is the `attributes` key on the record (and any nested `attributes` object); these
   are never copied.
 - The nested `Account` object is treated as consumed and is not copied into `custom_fields`.

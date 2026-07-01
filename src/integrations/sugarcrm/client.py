@@ -53,7 +53,7 @@ class SugarCrmClient:
         """Fetches one page of contacts and returns (records, next_offset)."""
         url = f"{self.endpoint}/rest/v11/Contacts"
         params = {
-            "fields": "id,first_name,last_name,name,full_name,email,email1,phone_work,phone_mobile,title,account_name,date_entered,date_modified",
+            "fields": "id,first_name,last_name,name,full_name,email,email1,title,account_name,date_entered,date_modified",
             "max_num": 200,
             "order_by": "date_entered:asc",
         }

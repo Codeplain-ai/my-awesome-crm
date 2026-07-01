@@ -55,7 +55,7 @@ class DynamicsClient:
 
         # Initial query parameters as defined in openapi.yaml
         params = {
-            "$select": "contactid,fullname,firstname,lastname,emailaddress1,telephone1,mobilephone,jobtitle",
+            "$select": "contactid,fullname,firstname,lastname,emailaddress1,jobtitle",
             "$expand": "parentcustomerid_account($select=name)",
         }
 

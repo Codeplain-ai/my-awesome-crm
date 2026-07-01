@@ -26,11 +26,11 @@ info:
     not OAuth.
 
     Dirty-data notes (anticipated, to confirm on the live cross-check): email
-    and phone are each an ARRAY of objects shaped {value, label, primary}, not
+    is an ARRAY of objects shaped {value, label, primary}, not
     flat strings - the integration must pick the entry whose primary flag is
     true, else the first entry, else None. An email value is NOT guaranteed to
     be a valid email address. Most fields (name, first_name, last_name,
-    job_title, org_id, email, phone) are nullable; only id is always present.
+    job_title, org_id, email) are nullable; only id is always present.
     org_id may be null, or an object whose name field holds the organization
     name.
   version: v1
@@ -160,7 +160,7 @@ components:
       type: object
       description: >
         One Person entry of data[]. Only id is guaranteed present; every other
-        field is nullable. email and phone are each an ARRAY of objects shaped
+        field is nullable. email is an ARRAY of objects shaped
         {value, label, primary} - the integration picks the entry whose primary
         flag is true, else the first entry, else None. An email value is NOT
         guaranteed to be a valid email address. org_id may be null or an object
@@ -179,10 +179,6 @@ components:
         last_name:
           type: [string, "null"]
         email:
-          type: [array, "null"]
-          items:
-            $ref: "#/components/schemas/ContactPoint"
-        phone:
           type: [array, "null"]
           items:
             $ref: "#/components/schemas/ContactPoint"
@@ -210,8 +206,8 @@ components:
     ContactPoint:
       type: object
       description: >
-        One entry of the email[] or phone[] array. value carries the email
-        address or phone number; primary marks the preferred entry.
+        One entry of the email[] array. value carries the email address;
+        primary marks the preferred entry.
       properties:
         value:
           type: [string, "null"]

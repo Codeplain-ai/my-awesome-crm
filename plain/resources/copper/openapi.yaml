@@ -17,8 +17,7 @@ info:
 
     Dirty-data notes from the documentation: emails is an ARRAY of objects
     (each {email, category}); a record can carry zero, one, or many emails, and
-    an email value is NOT guaranteed to be a valid email address. phone_numbers
-    is likewise an array of {number, category} objects. Most fields are nullable
+    an email value is NOT guaranteed to be a valid email address. Most fields are nullable
     (name, title, company_name, company_id, address can all be null). The record
     id is a number. custom_fields is an array of {custom_field_definition_id,
     value} objects rather than a flat map.
@@ -135,7 +134,7 @@ components:
       type: object
       description: >
         One People entry of the response array. The record id is a NUMBER.
-        emails and phone_numbers are arrays of category-tagged objects; an
+        emails is an array of category-tagged objects; an
         email value is NOT guaranteed to be a valid email address. name, title,
         company_name, company_id and address are all nullable. custom_fields is
         an array of {custom_field_definition_id, value} objects.
@@ -182,11 +181,6 @@ components:
             supplies primary_email; an email value is NOT guaranteed valid.
           items:
             $ref: "#/components/schemas/EmailEntry"
-        phone_numbers:
-          type: array
-          description: Category-tagged phone objects. May be empty.
-          items:
-            $ref: "#/components/schemas/PhoneEntry"
         socials:
           type: array
           items:
@@ -243,16 +237,6 @@ components:
         category:
           type: [string, "null"]
           description: e.g. work, home, other.
-      additionalProperties: true
-    PhoneEntry:
-      type: object
-      description: One category-tagged phone number.
-      properties:
-        number:
-          type: [string, "null"]
-        category:
-          type: [string, "null"]
-          description: e.g. work, home, mobile.
       additionalProperties: true
     CustomFieldEntry:
       type: object

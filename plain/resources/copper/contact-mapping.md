@@ -49,7 +49,7 @@ absent.
 - `custom_fields` captures the Copper provenance timestamps `date_created` and `date_modified`
   from the input record, each copied verbatim when present and non-null.
 - The consumed business keys (`id`, `name`, `first_name`, `last_name`, `title`, `company_name`,
-  `emails`, `phone_numbers`) are not copied into `custom_fields`.
+  `emails`) are not copied into `custom_fields`.
 - The Copper `custom_fields` array (each `{custom_field_definition_id, value}` entry) is not copied
   verbatim, because its definition ids are opaque and not meaningful without a separate lookup.
 - Record envelope and unused fields (`middle_name`, `prefix`, `suffix`, `company_id`, `assignee_id`,

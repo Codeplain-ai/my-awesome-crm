@@ -97,8 +97,6 @@ def _extract_custom_fields(raw: dict[str, Any]) -> dict[str, Any]:
         "First_Name",
         "Last_Name",
         "Email",
-        "Phone",
-        "Mobile",
         "Title",
         "Account_Name",
     }

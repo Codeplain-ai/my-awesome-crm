@@ -214,10 +214,6 @@ components:
           type: [string, "null"]
         email:
           type: [string, "null"]
-        phone:
-          type: [string, "null"]
-        mobile:
-          type: [string, "null"]
         customer_status:
           type: [string, "null"]
         prospect_status:

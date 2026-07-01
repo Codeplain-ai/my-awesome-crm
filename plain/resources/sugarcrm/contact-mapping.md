@@ -52,7 +52,7 @@ absent.
 - `custom_fields` captures the Sugar provenance timestamps `date_entered` and `date_modified` from
   the input record, each copied verbatim when present and non-null.
 - The consumed business keys (`id`, `first_name`, `last_name`, `name`, `full_name`, `email`,
-  `email1`, `phone_work`, `phone_mobile`, `title`, `account_name`) are not copied into
+  `email1`, `title`, `account_name`) are not copied into
   `custom_fields`.
 - Sugar API metadata keys (any key beginning with `_`, such as `_acl` and `_module`) are never
   copied.

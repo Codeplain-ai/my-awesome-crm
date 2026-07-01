@@ -20,7 +20,7 @@ info:
 
     Dirty-data notes (the tricky part): Nimble stores each contact field under a
     `fields` map where every field key (e.g. "first name", "last name", "email",
-    "phone", "title", "company") maps to an ARRAY of entries, each an object with
+    "title", "company") maps to an ARRAY of entries, each an object with
     `value`, `modifier`, and optional `group`/`label`. The integration takes the
     first entry's `value` per field. A field key can be absent, its array empty,
     or an entry's `value` null - all treated as missing. The email value is NOT
@@ -160,7 +160,7 @@ components:
       type: object
       description: >
         The contact's field map. Each KEY is a lowercase, space-separated field
-        name (e.g. "first name", "last name", "email", "phone", "title",
+        name (e.g. "first name", "last name", "email", "title",
         "company") and each VALUE is an ARRAY of FieldEntry objects. The
         integration reads the first entry's `value` for each field it consumes.
         A key may be absent, its array empty, or the first entry's `value` null -
@@ -176,10 +176,6 @@ components:
           items:
             $ref: "#/components/schemas/FieldEntry"
         email:
-          type: array
-          items:
-            $ref: "#/components/schemas/FieldEntry"
-        phone:
           type: array
           items:
             $ref: "#/components/schemas/FieldEntry"
