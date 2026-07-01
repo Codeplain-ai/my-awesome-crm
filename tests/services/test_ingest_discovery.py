@@ -17,7 +17,7 @@ def test_discover_integrations_valid(temp_integrations_dir, monkeypatch):
     pipedrive_dir = temp_integrations_dir / "pipedrive"
     pipedrive_dir.mkdir()
     with open(pipedrive_dir / "__init__.py", "w") as f:
-        f.write("def fetch_contacts(): return []")
+        f.write("def fetch(get_stored): return []")
 
     # Override the path and the module lookup
     monkeypatch.setenv("CRM_INTEGRATIONS_PATH", str(temp_integrations_dir))
@@ -30,7 +30,7 @@ def test_discover_integrations_valid(temp_integrations_dir, monkeypatch):
     from unittest.mock import MagicMock
     
     mock_module = MagicMock()
-    mock_module.fetch_contacts = lambda: []
+    mock_module.fetch = lambda get_stored: []
     
     def mock_import(name):
         if name == "src.integrations.pipedrive":
@@ -47,14 +47,14 @@ def test_discover_integrations_ignores_private(temp_integrations_dir, monkeypatc
     private_dir = temp_integrations_dir / "_utils"
     private_dir.mkdir()
     with open(private_dir / "__init__.py", "w") as f:
-        f.write("def fetch_contacts(): return []")
+        f.write("def fetch(get_stored): return []")
 
     monkeypatch.setenv("CRM_INTEGRATIONS_PATH", str(temp_integrations_dir))
     discovered = discover_integrations()
     assert "_utils" not in discovered
 
 def test_discover_integrations_invalid_contract(temp_integrations_dir, monkeypatch):
-    # Missing fetch_contacts
+    # Missing fetch
     invalid_dir = temp_integrations_dir / "invalid_crm"
     invalid_dir.mkdir()
     with open(invalid_dir / "__init__.py", "w") as f:

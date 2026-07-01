@@ -49,22 +49,27 @@ def test_run_integration_success(client, monkeypatch, pathlib_tmpdir):
     
     monkeypatch.setenv("CRM_INTEGRATIONS_PATH", str(pathlib_tmpdir))
     
-    # Mock the module import
+    # Mock the module import — the current host contract is fetch(get_stored),
+    # returning a list of {data_type, data} dicts (not the old fetch_contacts()).
     mock_module = MagicMock()
-    mock_module.fetch_contacts = lambda: [
+    mock_module.DATA_TYPE = "contact"
+    mock_module.fetch = lambda get_stored: [
         {
-            "provider_id": "test_crm",
-            "external_id": "ext-1",
-            "full_name": "Test User",
-            "primary_email": "test@example.com"
+            "data_type": "contact",
+            "data": {
+                "provider_id": "test_crm",
+                "external_id": "ext-1",
+                "full_name": "Test User",
+                "primary_email": "test@example.com",
+            },
         }
     ]
-    
+
     def mock_import(name):
         if name == f"src.integrations.{integration_name}":
             return mock_module
         raise ImportError()
-        
+
     monkeypatch.setattr(importlib, "import_module", mock_import)
 
     response = client.get(f"/ingest/{integration_name}")
@@ -73,7 +78,9 @@ def test_run_integration_success(client, monkeypatch, pathlib_tmpdir):
     data = response.json()
     assert data["integration"] == integration_name
     assert data["fetched"] == 1
-    assert data["created"] == 1
+    assert data["stored"] == 1
+    assert data["replaced"] == 0
+    assert data["data_types"] == {"contact": 1}
 
 def test_run_integration_not_found(client, monkeypatch):
     response = client.get("/ingest/non_existent")
@@ -89,9 +96,9 @@ def test_run_integration_failure_502(client, monkeypatch, pathlib_tmpdir):
     monkeypatch.setenv("CRM_INTEGRATIONS_PATH", str(pathlib_tmpdir))
     
     mock_module = MagicMock()
-    def fail(): raise Exception("API Down")
-    mock_module.fetch_contacts = fail
-    
+    def fail(get_stored): raise Exception("API Down")
+    mock_module.fetch = fail
+
     monkeypatch.setattr(importlib, "import_module", lambda n: mock_module)
 
     response = client.get(f"/ingest/{integration_name}")
