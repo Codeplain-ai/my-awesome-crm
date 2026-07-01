@@ -64,7 +64,7 @@ the provider's API). Template:
 import:
   - crm_common
   - integration_testing
-description: "<Provider> Integration plug-in for the consolidated CRM backend. Adds src/integrations/<provider>/ so that GET /ingest/<provider> pulls Contact records from <provider> via its REST API and persists them through the host's dedup pipeline."
+description: "<Provider> Integration plug-in for the CRM backend. Adds src/integrations/<provider>/ so that GET /ingest/<provider> pulls Contact records from <provider> via its REST API and stores them as contact records in the host's generic record store."
 ---
 ```
 

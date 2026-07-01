@@ -43,6 +43,15 @@ Do **not** invoke any of the following skills in this project:
 
 **When building a new integration, always run `/plain-healthcheck` at the end.**
 
+## Never spawn agents or workflows in this repo
+
+**Agents and workflows should never be spawned in this repo.** Do not use the `Agent` tool (of any
+`subagent_type`, including `fork`, `Explore`, `Plan`, and `general-purpose`) and do not use the
+`Workflow` tool. All work — authoring, editing, reviewing, debugging, host discovery, and API
+cross-checks — is done directly in the main conversation. The full authoring context is already
+loaded via CLAUDE.md `@imports`, so there is no research a subagent could do that this session
+cannot do itself.
+
 ## Do not create a plan when writing plain specs
 
 When authoring, editing, reviewing, or debugging any `.plain` content, **do not use the plan tool**
@@ -64,7 +73,7 @@ the provider's API). Template:
 import:
   - crm_common
   - integration_testing
-description: "<Provider> Integration plug-in for the consolidated CRM backend. Adds src/integrations/<provider>/ so that GET /ingest/<provider> pulls Contact records from <provider> via its REST API and persists them through the host's dedup pipeline."
+description: "<Provider> Integration plug-in for the CRM backend. Adds src/integrations/<provider>/ so that GET /ingest/<provider> pulls Contact records from <provider> via its REST API and stores them as contact records in the host's generic record store."
 ---
 ```
 
