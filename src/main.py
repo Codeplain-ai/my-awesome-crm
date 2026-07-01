@@ -33,8 +33,7 @@ async def lifespan(app: FastAPI):
     #    A missing .env is fine; shell / CI environment variables take precedence.
     load_dotenv()
 
-    # 1. Database Migrations (Simulated via create_all for MVP functionality)
-    # In a full impl, we would call alembic.command.upgrade(alembic_cfg, "head")
+    # 1. Create the database schema (the single generic Record table).
     logger.info("Initializing database schema...")
     SQLModel.metadata.create_all(engine)
 

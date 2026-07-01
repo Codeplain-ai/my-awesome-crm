@@ -61,9 +61,8 @@ description: Shared concepts and tech-stack implementation reqs for the CRM host
   - Every column field on a SQLModel `table=True` class must carry an explicit Python type annotation alongside its `Field(...)` default - SQLModel on Pydantic v2 raises `PydanticUserError: Field '<name>' requires a type annotation` when a field has no annotation. Use forms like `id: int | None = Field(default=None, primary_key=True)`, `data_type: str = Field(index=True)`, `created_at: datetime = Field(default_factory=datetime.utcnow)`. Never write `id = Field(...)` without an annotation.
   - The `data` JSON column on :Record: is declared with a typed Python container annotation and a `Field(sa_column=Column(JSON), default_factory=dict)` mapping; the model attribute is typed as `dict[str, Any]`.
 
-- :Implementation: should use Alembic for schema migrations.
-  - Alembic config lives at the repository root (`alembic.ini`) with the migrations directory at `alembic/`.
-  - On startup, the host ensures the schema exists before serving requests.
+- :Implementation: should create the database schema on startup via SQLModel's metadata, before serving requests.
+  - No separate schema-migration tool is used; the single generic :Record: table is created directly.
 
 - :Implementation: should use Pydantic v2 models (separate from the SQLModel persistence models) for request and response schemas exposed by the HTTP API.
   - Persistence models are not returned directly from the API; they are converted to response models first.

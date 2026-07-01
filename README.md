@@ -52,7 +52,6 @@ You don't hand-write the integration code — you write a **[\*\*\*plain](https:
 
 - ⚡ **FastAPI** — the web framework
 - 🐘 **SQLModel** + **SQLite** — model & storage
-- 🪶 **Alembic** — migrations
 - 🪵 **JSON logging** — for the observability nerds (we see you, and we love you)
 
 ---
