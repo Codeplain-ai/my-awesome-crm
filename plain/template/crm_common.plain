@@ -30,6 +30,7 @@ description: Shared concepts and tech-stack implementation reqs for the CRM host
 - :Integration: is a runtime-discovered plug-in that pulls records out of a particular :Provider:.
   - One :Integration: corresponds to one :Provider: identifier, which is recorded as the `source` of every :Record: it produces.
   - The host logic that discovers integrations and invokes them in the ingest workflow is [ingest.py](../src/services/ingest.py) - imported from the host codebase; do not redefine or modify it.
+  - That module exports `discover_integrations()` and `run_integration_service(session, integration_name)` at the fully qualified import path `src.services.ingest` - conformance and unit tests that exercise host wiring must import from exactly that path, never a guessed shorter path like `src.ingest`.
   - Integrations are discovered from the filesystem at runtime - the :Integration: named "foo" lives in `src/integrations/foo/` and may consist of multiple files inside that folder.
   - An :Integration: may produce records of one or more data_types; the data_type travels with each record, so a single integration can emit several kinds.
   - Plug-in contract - the integration package `src/integrations/{name}/__init__.py` must expose a top-level callable `fetch(get_stored)`.
@@ -83,6 +84,12 @@ description: Shared concepts and tech-stack implementation reqs for the CRM host
 - The host stores whatever an :Integration: returns verbatim - there is no host-side validation, deduplication, or merging of records.
   - Pulling records from a :Provider: either succeeds and returns a complete batch, or fails as a whole.
   - Errors acquiring data (missing credentials, authentication failure, transport/HTTP errors) propagate to the caller; the host commits no partial writes when `fetch(get_stored)` raises.
+
+- Every :Integration:'s `fetch(get_stored)` applies a skip-and-log batch policy around its per-record mapping function.
+  - When the mapping function raises `ValueError` for a record, that record is skipped.
+  - A warning is logged naming the provider's record identifier and the reason for the skip.
+  - Processing continues with the remaining records; a skipped record never aborts the batch.
+  - A mapping function that never raises `ValueError` simply never triggers this policy.
 
 - Every :Integration: lives at `src/integrations/<id>/` with its :UnitTests: at `tests/integrations/<id>/`, keyed by its unique :Provider: identifier `<id>`.
   - Each integration module defines exactly one :Provider: identifier; it is unique across all integrations.

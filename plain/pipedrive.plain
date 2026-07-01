@@ -31,7 +31,6 @@ description: "Pipedrive Integration plug-in for the CRM backend. Adds src/integr
 - Implement a function that implements :PipedriveContactMapping: as a pure function within the integration package.
 
 - Implement :PipedriveIntegration:'s `fetch(get_stored)` entry point.
-  - The entry point accepts the host's `get_stored` callback; this integration does not need to read already-stored records, so it may ignore the callback.
   - Read :PipedriveCredentials: from environment variables. If any required variable is missing or empty, raise `RuntimeError` with a message naming the missing environment variable key (e.g. `PIPEDRIVE_API_TOKEN`).
   - Request the first page of persons from the persons list endpoint of :PipedriveRestAPI: with its pinned page size and the `api_token` query parameter, against the company host derived from `PIPEDRIVE_COMPANY_DOMAIN`.
   - Read every subsequent page per the pagination envelope of :PipedriveRestAPI: until all pages are read.

@@ -34,7 +34,6 @@ description: "Zoho CRM Integration plug-in for the CRM backend. Adds src/integra
 - Implement a function that implements :ZohoContactMapping: as a pure function within the integration package.
 
 - Implement :ZohoIntegration:'s `fetch(get_stored)` entry point.
-  - The entry point accepts the host's `get_stored` callback; this integration does not need to read already-stored records, so it may ignore the callback.
   - Read :ZohoCredentials: from environment variables. If any required variable is missing or empty, raise `RuntimeError` with a message naming the missing environment variable key (e.g. `ZOHO_REFRESH_TOKEN`).
   - Acquire a bearer access token via the OAuth refresh-token grant of :ZohoRestAPI:, sent on subsequent calls as the `Zoho-oauthtoken` authorization scheme of :ZohoRestAPI:.
   - Request the first page of contacts from the Contacts list endpoint of :ZohoRestAPI: with its pinned fields list, pinned page size, and the authorization header.

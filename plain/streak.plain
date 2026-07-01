@@ -30,7 +30,6 @@ description: "Streak Integration plug-in for the CRM backend. Adds src/integrati
 - Implement a function that implements :StreakContactMapping: as a pure function within the integration package.
 
 - Implement :StreakIntegration:'s `fetch(get_stored)` entry point.
-  - The entry point accepts the host's `get_stored` callback; this integration does not need to read already-stored records, so it may ignore the callback.
   - Read :StreakCredentials: from environment variables. If any required variable is missing or empty, raise `RuntimeError` with a message naming the missing environment variable key (e.g. `STREAK_API_KEY`).
   - Authenticate every request by sending the API key via HTTP Basic per :StreakRestAPI: (the key is the username, the password is empty).
   - List every team the key can access from the teams endpoint of :StreakRestAPI:.

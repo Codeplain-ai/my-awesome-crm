@@ -33,7 +33,6 @@ description: "Dynamics 365 Integration plug-in for the CRM backend. Adds src/int
 - Implement a function that implements :DynamicsContactMapping: as a pure function within the integration package.
 
 - Implement :DynamicsIntegration:'s `fetch(get_stored)` entry point.
-  - The entry point accepts the host's `get_stored` callback; this integration does not need to read already-stored records, so it may ignore the callback.
   - Read :DynamicsCredentials: from environment variables. If any required variable is missing or empty, raise `RuntimeError` with a message naming the missing environment variable key (e.g. `DYNAMICS_ENDPOINT`).
   - Acquire a bearer token via the OAuth client-credentials flow of :DynamicsRestAPI:, using the org base URL plus `/.default` as the scope.
   - Request the first page of contacts from the query endpoint of :DynamicsRestAPI: with its pinned query options and headers.

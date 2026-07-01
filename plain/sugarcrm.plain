@@ -34,7 +34,6 @@ description: "SugarCRM Integration plug-in for the CRM backend. Adds src/integra
 - Implement a function that implements :SugarCrmContactMapping: as a pure function within the integration package.
 
 - Implement :SugarCrmIntegration:'s `fetch(get_stored)` entry point.
-  - The entry point accepts the host's `get_stored` callback; this integration does not need to read already-stored records, so it may ignore the callback.
   - Read :SugarCrmCredentials: from environment variables. If any required variable is missing or empty, raise `RuntimeError` with a message naming the missing environment variable key (e.g. `SUGARCRM_ENDPOINT`).
   - Acquire an access token via the OAuth password-grant token endpoint of :SugarCrmRestAPI:, then send it in the `OAuth-Token` header on every data call as defined by :SugarCrmRestAPI:.
   - Request the first page of contacts from the contacts list endpoint of :SugarCrmRestAPI: with its pinned field list, pinned page size, and headers.

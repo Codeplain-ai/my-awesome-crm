@@ -30,7 +30,6 @@ description: "Close Integration plug-in for the CRM backend. Adds src/integratio
 - Implement a function that implements :CloseContactMapping: as a pure function within the integration package.
 
 - Implement :CloseIntegration:'s `fetch(get_stored)` entry point.
-  - The entry point accepts the host's `get_stored` callback; this integration does not need to read already-stored records, so it may ignore the callback.
   - Read :CloseCredentials: from environment variables. If any required variable is missing or empty, raise `RuntimeError` with a message naming the missing environment variable key (e.g. `CLOSE_API_KEY`).
   - Send the HTTP Basic authorization header per :CloseRestAPI: on every request, with the API key as the username and a blank password.
   - Request the first page of contacts from the contact list endpoint of :CloseRestAPI: with its pinned `_limit` page size.

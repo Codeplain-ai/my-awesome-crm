@@ -30,7 +30,6 @@ description: "Nimble Integration plug-in for the CRM backend. Adds src/integrati
 - Implement a function that implements :NimbleContactMapping: as a pure function within the integration package.
 
 - Implement :NimbleIntegration:'s `fetch(get_stored)` entry point.
-  - The entry point accepts the host's `get_stored` callback; this integration does not need to read already-stored records, so it may ignore the callback.
   - Read :NimbleCredentials: from environment variables. If any required variable is missing or empty, raise `RuntimeError` with a message naming the missing environment variable key (e.g. `NIMBLE_ACCESS_TOKEN`).
   - Request the first page of contacts from the contacts list endpoint of :NimbleRestAPI: with its pinned query parameters and the Bearer authorization header carrying the access token.
   - Read every subsequent page per the pagination envelope of :NimbleRestAPI: until all pages are read.

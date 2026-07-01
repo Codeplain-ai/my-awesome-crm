@@ -2,12 +2,8 @@
 
 A Python 3.12 / FastAPI CRM host (`src/`) with an **embedded ***plain integration project** under
 `plain/`. Each of the 10 providers is one root `.plain` module (`salesforce.plain`, `dynamics.plain`, …) that imports `crm_common` + `integration_testing` and emits a
-runtime-discovered plug-in at `src/integrations/<name>/` exposing `fetch_contacts()`, which returns
+runtime-discovered plug-in at `src/integrations/<name>/` exposing `fetch()`, which returns
 normalized `:IncomingContact:` records.
-
-The authoritative authoring rules live in `.claude/rules/`. **Read them and obey them first** — this
-file does not restate them. It captures only the hard-won lessons the rules alone did not prevent,
-and points back to the rule that governs each one.
 
 ## The reference and host context are auto-loaded into context
 
@@ -87,7 +83,7 @@ the next question.* Each write must follow the **spec-writing style of `salesfor
 structural exemplar) exactly:
 
 - Put the answer in the section it belongs to per the rules — `***definitions***` for a concept, `***test reqs***` for
-  `:ConformanceTests:` facts, `***functional specs***` for WHAT.
+  `:ConformanceTests:` facts, `***functional specs***` for functionalities.
 - Mirror salesforce's shape: 5 definitions, 1 test req, 3 functional specs;
   the whole API surface behind `:<Provider>RestAPI:` in `resources/<provider>/openapi.yaml` and the
   mapping contract behind `:<Provider>ContactMapping:` in `resources/<provider>/contact-mapping.md`
@@ -110,20 +106,12 @@ specs AND into this file** so the next integration never hits it.
 
 ## Authoring the next integration — `salesforce.plain` is the structural exemplar
 
-`salesforce.plain` was refactored end-to-end and re-rendered green; it **supersedes `dynamics.plain`
-as the structural exemplar**. Dynamics remains the evidence for the line-length lesson above but is
-only partly migrated: its layout bullet still names `client.py`/`mapping.py`, its auth / query /
-pagination details are still inline rather than behind an OpenAPI concept, its test reqs still
-declare the conformance folder, and its email guard is still a local implementation req — do not
-copy those parts. The target module is ~60 lines; everything bulkier belongs in `resources/` or
-`template/crm_common.plain`:
-
 - **5 definitions** — provider id, credentials (env-var names), `:<Provider>RestAPI:` (OpenAPI link),
   `:<Provider>ContactMapping:` (mapping-doc link), and the integration concept itself.
 - **1 test req** — conformance targets the provider's live API + the exact credential env-var names
   (identical to the names the runtime reads). Nothing else: folder location, framework, runner
   script, and pass criteria all come from the imported `integration_testing` template.
-- **3 functional specs** — mapping, the `fetch_contacts()` composition, one-bullet wiring.
+- **3 functional specs** — mapping, the `fetch()` composition, one-bullet wiring.
 
 ### The whole API surface lives in `resources/<provider>/openapi.yaml`, reached through one concept
 
@@ -172,22 +160,8 @@ hoisted into `crm_common`.
   `:Integration:` concept — discovery + invocation logic) and `../requirements.txt` (under the pip
   req — the no-re-pin source of truth). Never re-link or paraphrase these per-module.
 
-The per-provider residue (never restate a shared rule's body; either inherit silently like
-`salesforce.plain` or use `dynamics.plain`'s explicit pointer phrasing **"the shared X (from the
-imported common reqs) applies with <provider-specific parameters>"** when a parameter must be
-bound):
-
-1. the `:Provider:` identifier binding;
-2. the provider-side id field named in skip warnings, plus the probed org's expected skip counts
-   recorded as "skipped by design" in its `rest-crosscheck.md` (salesforce's probed org expects 0
-   skips; dynamics' expects 142 of 341 — see *Live data is dirty* below);
-3. the host packages reused **by name** (e.g. `requests`) and any deliberate no-SDK constraint;
-4. the live-API test req with the exact env-var names;
-5. optionally, the three `:UnitTests:` parameterizations (unmappable-record shape, pagination
-   continuation marker, malformed-email example) — the `dynamics.plain` pattern.
-
 A functional spec may still narrate per-record behavior that *is* that functionality's WHAT (the
-`fetch_contacts()` composition names the skip-on-`ValueError` step inline) — the prohibition is on
+`fetch()` composition names the skip-on-`ValueError` step inline) — the prohibition is on
 restating the shared *policy* as a second implementation req.
 
 ### Never mandate internals — and know what the relaxation costs
@@ -221,6 +195,12 @@ mandates that an error message "names" something, pin the identifier space and g
   `SALESFORCE_SLIENT_SECRET` typo (for `SALESFORCE_CLIENT_SECRET`) would have failed every live
   conformance attempt; the conformance runner is deliberately integration-agnostic and will not
   catch it — only the live `RuntimeError` would, mid-render.
+- **Always check the `.env` file at the repo root first when looking for credentials to do the
+  live-API cross-check probing (`integrations.md` § *Live API must be cross-checked*).** It already
+  carries credentials for several providers (e.g. Salesforce, Dynamics) under the exact env-var
+  names the runtime and conformance tests read. Only ask the user for credentials when the provider
+  being probed has no entry there yet. Never print or paste the values themselves into a spec,
+  summary, or commit — reference them by env-var name only.
 - **Keep `verbose: true` in `plain/config.yaml`.** codeplain's `--verbose` defaults to *disabled*;
   without the config pin the log carries no test-script output, which silently blinds both the
   post-render mining below and `run-codeplain`'s spec-deviation classification.
@@ -271,11 +251,6 @@ record the host rejects aborts the *entire* ingest with zero writes, and it happ
 `EmailStr` (`src/models/schemas.py`), so a single live contact with a malformed email (e.g. a `&` in
 the domain) crashed the whole Salesforce ingest after a clean render (2026-06-08).
 
-**Rule:** the mapping must pre-validate **every field the host validates**, using the host's own
-validator, so anything it emits is guaranteed to construct cleanly into `:IncomingContact:`. For
-`primary_email`, validate with the host's `email-validator` (deliverability off, matching `EmailStr`)
-and emit `None` on failure rather than the bad value — the contact is still kept and still dedups
-(the fallback :DedupKey: is name+phone), so a bad email costs the email field, not the whole record. Probe for these during the dirty-data hunt
 (`integrations.md` § *Live API must be cross-checked*) — query for malformed/boundary values of every
 host-validated field, not just empty/null required ones — so the host's contract is satisfied from
 functionality 1 instead of discovered as a post-render crash.
@@ -372,6 +347,7 @@ at launch, so the context never drifts from source. The dynamic existing-integra
 separately by `.claude/hooks/load-integration-context.sh`. Paths are relative to this file (repo root).
 
 @.claude/skills/load-plain-reference/SKILL.md
+@README.md
 @plain/salesforce.plain
 @plain/template/crm_common.plain
 @plain/template/integration_testing.plain

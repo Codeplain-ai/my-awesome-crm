@@ -31,7 +31,6 @@ description: "Zendesk Sell Integration plug-in for the CRM backend. Adds src/int
   - The input is the `data` object of one entry of the `items` array of a :ZendeskSellRestAPI: list response.
 
 - Implement :ZendeskSellIntegration:'s `fetch(get_stored)` entry point.
-  - The entry point accepts the host's `get_stored` callback; this integration does not need to read already-stored records, so it may ignore the callback.
   - Read :ZendeskSellCredentials: from environment variables. If any required variable is missing or empty, raise `RuntimeError` with a message naming the missing environment variable key (e.g. `ZENDESK_SELL_ACCESS_TOKEN`).
   - Request the first page of contacts from the contacts list endpoint of :ZendeskSellRestAPI: with its pinned page size and the required headers (the Bearer authorization header, the Accept header, and a descriptive User-Agent header) of :ZendeskSellRestAPI:.
   - Read every subsequent page per the pagination envelope of :ZendeskSellRestAPI: until all pages are read.

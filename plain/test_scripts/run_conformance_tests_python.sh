@@ -158,11 +158,15 @@ done < "$ENV_FILE"
 banner "[6/8] Stage conformance tests into working folder"
 WORKING_FOLDER="$PLAIN_DIR/.tmp/python_conformance"
 printf "Working folder: %s\n" "$WORKING_FOLDER"
-if [ -d "$WORKING_FOLDER" ]; then
-    find "$WORKING_FOLDER" -mindepth 1 -exec rm -rf {} +
-else
-    mkdir -p "$WORKING_FOLDER"
-fi
+# Remove the folder itself in one shot rather than deleting its contents with
+# `find -exec rm -rf {} +`: on macOS's BSD find, that traversal races with the
+# rm -rf calls it spawns (a batched rm can delete a subtree - e.g. a nested
+# .venv from a prior run - while find is still descending into it), which
+# aborts with "fts_read: No such file or directory" partway through and
+# leaves stale files from a previous conformance run behind to be picked up
+# by pytest alongside the current run's freshly-copied tests.
+rm -rf "$WORKING_FOLDER"
+mkdir -p "$WORKING_FOLDER"
 cp -R "$ABS_TESTS_FOLDER"/. "$WORKING_FOLDER"/
 
 # ----- [7/8] Install dependencies (isolated venv inside working folder) -----

@@ -32,7 +32,6 @@ description: "Salesforce Integration plug-in for the CRM backend. Adds src/integ
 - Implement a function that implements :SalesforceContactMapping: as a pure function within the integration package.
 
 - Implement :SalesforceIntegration:'s `fetch(get_stored)` entry point.
-  - The entry point accepts the host's `get_stored` callback; this integration does not need to read already-stored records, so it may ignore the callback.
   - Read :SalesforceCredentials: from environment variables. If any required variable is missing or empty, raise `RuntimeError` with a message naming the missing environment variable key (e.g. `SALESFORCE_ENDPOINT`).
   - Acquire a bearer token and the instance base URL via the OAuth client-credentials flow of :SalesforceRestAPI:.
   - Request the first page of contacts from the query endpoint of :SalesforceRestAPI: with its pinned SOQL and headers.

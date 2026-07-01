@@ -31,7 +31,6 @@ description: "Copper Integration plug-in for the CRM backend. Adds src/integrati
 - Implement a function that implements :CopperContactMapping: as a pure function within the integration package.
 
 - Implement :CopperIntegration:'s `fetch(get_stored)` entry point.
-  - The entry point accepts the host's `get_stored` callback; this integration does not need to read already-stored records, so it may ignore the callback.
   - Read :CopperCredentials: from environment variables. If any required variable is missing or empty, raise `RuntimeError` with a message naming the missing environment variable key (e.g. `COPPER_API_KEY`).
   - Authenticate to :CopperRestAPI: using header-based API-key authentication: send the API key and the account email plus the fixed required headers on every request, per the security scheme of :CopperRestAPI:. There is no OAuth token-exchange step.
   - Request the first page of People from the People search endpoint of :CopperRestAPI: with its pinned page size and required headers, starting at the first page number.
