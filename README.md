@@ -58,6 +58,39 @@ You don't hand-write the integration code — you write a **[\*\*\*plain](https:
 
 ## 🚀 Quickstart
 
+### The easy way — one script does it all 🪄
+
+There's a getting-started script that bootstraps **and** runs everything. It's
+idempotent: the first run sets up Python 3.12, the virtualenv, and the
+dependencies, then starts the server — and every run after that just starts the
+server.
+
+```bash
+# macOS / Linux
+./scripts/start.sh
+```
+
+```powershell
+# Windows (PowerShell)
+.\scripts\start.ps1
+```
+
+What the script does, in order:
+
+1. **Checks for Python 3.12.** If it's missing, it asks before installing it for
+   you — via Homebrew on macOS, `apt`/`dnf` on Linux, or winget/Chocolatey on
+   Windows.
+2. **Creates `.venv`** if it isn't there yet.
+3. **Installs `requirements.txt`** — only when they're missing or have changed.
+4. **Starts the server** on `CRM_PORT` (default `8000`).
+
+> On Windows you may need to allow the script to run once:
+> `powershell -ExecutionPolicy Bypass -File .\scripts\start.ps1`
+
+### The manual way (with python3.12 already installed) 🔧 
+
+Prefer to drive it yourself? The same steps by hand:
+
 ```bash
 # 1. Set up the environment
 python -m venv .venv && source .venv/bin/activate
