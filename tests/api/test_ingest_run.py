@@ -82,6 +82,91 @@ def test_run_integration_success(client, monkeypatch, pathlib_tmpdir):
     assert data["replaced"] == 0
     assert data["data_types"] == {"contact": 1}
 
+def _mock_integration(monkeypatch, pathlib_tmpdir, integration_name, records):
+    """Wire up a fake integration whose fetch() returns `records` (a list or a
+    zero-arg callable returning a fresh list each call)."""
+    integration_dir = pathlib_tmpdir / integration_name
+    if not integration_dir.exists():
+        integration_dir.mkdir()
+        (integration_dir / "__init__.py").touch()
+    monkeypatch.setenv("CRM_INTEGRATIONS_PATH", str(pathlib_tmpdir))
+
+    mock_module = MagicMock()
+    mock_module.DATA_TYPE = "contact"
+    mock_module.fetch = lambda get_stored: (records() if callable(records) else records)
+
+    def mock_import(name):
+        if name == f"src.integrations.{integration_name}":
+            return mock_module
+        raise ImportError()
+
+    monkeypatch.setattr(importlib, "import_module", mock_import)
+
+
+def _contact(ext_id, name="Test User", email="test@example.com"):
+    return {
+        "data_type": "contact",
+        "data": {
+            "provider_id": "test_crm",
+            "external_id": ext_id,
+            "full_name": name,
+            "primary_email": email,
+        },
+    }
+
+
+def test_resync_identical_data_is_idempotent(client, monkeypatch, pathlib_tmpdir):
+    # Same 2 records returned on every sync.
+    _mock_integration(monkeypatch, pathlib_tmpdir, "test_crm",
+                      [_contact("ext-1"), _contact("ext-2")])
+
+    first = client.get("/ingest/test_crm").json()
+    assert (first["fetched"], first["stored"], first["replaced"]) == (2, 2, 0)
+
+    second = client.get("/ingest/test_crm").json()
+    # Nothing new, nothing changed — nothing deleted.
+    assert second["fetched"] == 2
+    assert second["stored"] == 0
+    assert second["replaced"] == 0
+    assert second["unchanged"] == 2
+
+    # The store did not grow or shrink across the re-sync.
+    assert client.get("/records").json()["total"] == 2
+
+
+def test_resync_updates_changed_record_in_place(client, monkeypatch, pathlib_tmpdir):
+    state = {"records": [_contact("ext-1", name="Old Name")]}
+    _mock_integration(monkeypatch, pathlib_tmpdir, "test_crm", lambda: state["records"])
+
+    client.get("/ingest/test_crm")
+
+    # Same external_id, changed name → update in place, not a new row.
+    state["records"] = [_contact("ext-1", name="New Name")]
+    result = client.get("/ingest/test_crm").json()
+    assert result["stored"] == 0
+    assert result["replaced"] == 1
+    assert result["unchanged"] == 0
+
+    records = client.get("/records").json()
+    assert records["total"] == 1
+    assert records["items"][0]["data"]["full_name"] == "New Name"
+
+
+def test_resync_inserts_new_records_without_touching_existing(client, monkeypatch, pathlib_tmpdir):
+    state = {"records": [_contact("ext-1")]}
+    _mock_integration(monkeypatch, pathlib_tmpdir, "test_crm", lambda: state["records"])
+
+    client.get("/ingest/test_crm")
+
+    # ext-1 unchanged, ext-2 is new.
+    state["records"] = [_contact("ext-1"), _contact("ext-2")]
+    result = client.get("/ingest/test_crm").json()
+    assert result["stored"] == 1
+    assert result["replaced"] == 0
+    assert result["unchanged"] == 1
+    assert client.get("/records").json()["total"] == 2
+
+
 def test_run_integration_not_found(client, monkeypatch):
     response = client.get("/ingest/non_existent")
     assert response.status_code == 404

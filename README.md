@@ -15,12 +15,12 @@ You've got contacts in Salesforce. And Dynamics. And that one in Pipedrive your 
 
 - 🔌 **Plug-and-play integrations** — drop a provider folder in, and it gets auto-discovered. No registry, no config, no ceremony.
 - 🗃️ **Generic, type-agnostic storage** — every row is just a `data_type` (e.g. `"contact"`), the `source` that produced it, and a free-form JSON `data` payload. The store doesn't care what shape your records are.
-- ↩️ **Idempotent re-syncs** — each integration owns its own rows. Re-running it replaces what it stored last time, so syncing twice never duplicates.
+- ↩️ **Idempotent re-syncs** — the host upserts on `(source, data_type, external_id)`: known records are updated in place, new ones are inserted, and nothing is ever deleted. Syncing unchanged data twice is a no-op.
 - 👀 **Read-back callback** — when an integration runs, the host hands it a callback to read everything already stored for a `data_type`, so the integration can do whatever it likes with the existing data.
 - 🖥️ **Built-in web UI** — open the root URL and click your way through discovery, ingestion, and the record list. No auth, no setup.
 - 📋 **Paginated records API** — browse everything, or filter to a single `data_type`.
 
-> **Heads up:** there is intentionally **no deduplication or merging** in the host anymore. Records are stored verbatim. If a provider needs to reconcile against what's already there, that logic lives inside the integration — the host just stores what it's handed.
+> **Heads up:** the host matches records by their provider-side `external_id` (scoped to the integration and `data_type`). Records are stored verbatim — there's no fuzzy merging or cross-provider deduplication. A record with no `external_id` can't be matched, so it's always inserted.
 
 ## 🏢 Supported CRMs (10 and counting)
 
@@ -131,7 +131,9 @@ curl -X POST localhost:8000/ingest/discover
 
 # Pull everyone in from Salesforce
 curl localhost:8000/ingest/salesforce
-# → {"integration":"salesforce","data_type":"contact","fetched":42,"stored":42,"replaced":40}
+# → {"integration":"salesforce","data_types":{"contact":42},"fetched":42,"stored":42,"replaced":0,"unchanged":0}
+# Run it again with unchanged data and it's a no-op:
+# → {"integration":"salesforce","data_types":{"contact":42},"fetched":42,"stored":0,"replaced":0,"unchanged":42}
 
 # Browse everything in the store
 curl "localhost:8000/records?limit=10"
@@ -182,9 +184,13 @@ When you run an integration:
 
 1. The host calls its `fetch(get_stored)`, handing over a callback to read everything already stored for a `data_type`.
 2. The integration returns a list of `data` payloads.
-3. The host **deletes that integration's previous rows** and inserts the fresh ones.
+3. The host **upserts** each one, matching on `(source, data_type, external_id)`:
+   - a record that matches an existing row **updates it in place** (only when the data actually changed — counted as `replaced`),
+   - a record with no match is **inserted** (counted as `stored`),
+   - an existing record that's identical is **left untouched** (counted as `unchanged`),
+   - and **nothing is ever deleted**.
 
-That's it. No matching, no merging, no "are these the same human?" guesswork — records are stored exactly as the integration hands them over. Re-running an integration is safe: it always replaces its own slice of the store. 🕊️
+So re-running an integration is safe and cheap: unchanged records produce no writes, changed records are updated, and new records are added — the store only ever grows or updates, never loses data. 🕊️
 
 ---
 

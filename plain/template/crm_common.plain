@@ -37,7 +37,11 @@ description: Shared concepts and tech-stack implementation reqs for the CRM host
     - `get_stored` is a callback the host passes in; calling `get_stored(data_type)` returns every :Record: already stored for that data_type, regardless of source.
     - `fetch(get_stored)` returns a list of records; each record is a dict with a `data_type` string and a `data` object.
     - The host stores each returned record as a :Record: row under its own `data_type` and the integration's `source`, storing the `data` object verbatim.
-    - On each run the host first removes all of the integration's previously-stored rows (across every data_type), then inserts its fresh output, so re-syncing is idempotent.
+    - On each run the host upserts the integration's output; it never deletes previously-stored rows.
+      - Each returned record is matched to an existing row by its `source`, `data_type`, and `external_id`.
+      - A match is updated in place (only when its `data` actually changed); an unmatched record is inserted.
+      - Re-syncing is idempotent: an unchanged record produces no write, and nothing is ever removed.
+      - This lets an integration return only the records it wants to add or change, leaving the rest untouched.
     - If the callable is missing or raises, the host treats the integration as failed for that ingest call - no partial writes are committed.
 
 ***implementation reqs***

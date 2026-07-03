@@ -9,9 +9,9 @@ class Record(SQLModel, table=True):
 
     The store is deliberately untyped: every row carries a ``data_type``
     (e.g. ``"contact"``) and a free-form JSON ``data`` payload. ``source`` names
-    the integration that produced the row, which is all the host needs to make a
-    re-sync idempotent (an integration replaces its own rows). There is no
-    deduplication or merging — rows are stored verbatim.
+    the integration that produced the row. A re-sync upserts on
+    ``(source, data_type, external_id)``: matching rows are updated in place, new
+    rows are inserted, and nothing is deleted. Rows are stored verbatim.
     """
 
     id: int | None = Field(default=None, primary_key=True)

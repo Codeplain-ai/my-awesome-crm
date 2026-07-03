@@ -18,14 +18,10 @@ class RecordRepository:
         statement = select(Record).where(Record.data_type == data_type)
         return self.session.exec(statement).all()
 
-    def delete_by_source(self, source: str) -> int:
-        """Remove all rows produced by a given integration. Returns the count."""
-        rows = self.session.exec(
-            select(Record).where(Record.source == source)
-        ).all()
-        for row in rows:
-            self.session.delete(row)
-        return len(rows)
+    def list_by_source(self, source: str) -> Sequence[Record]:
+        """Every stored row produced by a given integration, any data_type."""
+        statement = select(Record).where(Record.source == source)
+        return self.session.exec(statement).all()
 
     def list_records(
         self,
