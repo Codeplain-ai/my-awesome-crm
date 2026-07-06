@@ -4,8 +4,8 @@ info:
   description: >
     The exact HubSpot CRM v3 REST API surface the hubspot integration calls.
     Grounded in the provider documentation AND verified against a live HubSpot
-    account (read-only GET probes) — see resources/docs/hubspot/rest-crosscheck.md.
-    Where docs and the live API disagreed, the live API wins.
+    account (read-only GET probes). Where docs and the live API disagreed, the
+    live API wins.
     API version is pinned to v3 (the current stable CRM objects API); it is
     carried in the URL path (/crm/v3/...), not a header.
 servers:
@@ -70,13 +70,6 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/PageEnvelope"
-              examples:
-                listPage:
-                  summary: Live-captured first page
-                  externalValue: ./fixtures/hubspot.contacts.list_page.json
-                dirtyRecord:
-                  summary: Live-captured record with null firstname/lastname
-                  externalValue: ./fixtures/hubspot.contacts.dirty_record.json
         "400":
           description: >
             Validation error, e.g. limit below 1 (live probe: category
@@ -85,9 +78,6 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorEnvelope"
-              examples:
-                validationError:
-                  externalValue: ./fixtures/hubspot.contacts.400_validation_error.json
         "401":
           description: >
             Missing or invalid access token (live probe: category
@@ -96,9 +86,6 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorEnvelope"
-              examples:
-                invalidAuth:
-                  externalValue: ./fixtures/hubspot.contacts.401_invalid_auth.json
 components:
   securitySchemes:
     bearerAuth:
