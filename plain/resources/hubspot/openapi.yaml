@@ -1,0 +1,214 @@
+openapi: 3.1.0
+info:
+  title: HubSpot CRM REST API surface used by the hubspot integration
+  description: >
+    The exact HubSpot CRM v3 REST API surface the hubspot integration calls.
+    Grounded in the provider documentation AND verified against a live HubSpot
+    account (read-only GET probes) — see resources/docs/hubspot/rest-crosscheck.md.
+    Where docs and the live API disagreed, the live API wins.
+    API version is pinned to v3 (the current stable CRM objects API); it is
+    carried in the URL path (/crm/v3/...), not a header.
+servers:
+  - url: https://api.hubapi.com
+    description: >
+      The single, global HubSpot API host. Unlike Salesforce there is no
+      per-account instance URL — every account is reached at this same host, so
+      no endpoint environment variable is needed. The account is selected solely
+      by the Private App access token.
+paths:
+  /crm/v3/objects/contacts:
+    get:
+      operationId: listContacts
+      summary: List (page) active Contact records
+      description: >
+        Returns one page of active (non-archived) contacts. The integration
+        pins the query: limit=100 (the maximum page size), the fixed property
+        list below, and no archived flag (so only active contacts are returned —
+        archived defaults to false). Subsequent pages are fetched by re-issuing
+        this same request with the after cursor set to paging.next.after from the
+        previous page (see components.schemas.PageEnvelope). Requesting an
+        unknown property is ignored by the live API (returns 200), so the pinned
+        list is safe across accounts.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: limit
+          in: query
+          required: true
+          description: >
+            Page size. The integration pins 100, the maximum the live API
+            accepts (a value below 1 returns 400 VALIDATION_ERROR — verified).
+          schema:
+            type: integer
+            const: 100
+        - name: properties
+          in: query
+          required: true
+          description: >
+            Comma-separated list of contact properties to return inside each
+            record's properties object. The integration pins exactly this list;
+            property names verified to exist on the live account.
+          schema:
+            type: string
+            const: firstname,lastname,email,jobtitle,company
+        - name: after
+          in: query
+          required: false
+          description: >
+            Opaque pagination cursor. Absent on the first request; on later
+            requests set to paging.next.after from the previous page. Follow the
+            after cursor value against this same path — do NOT follow
+            paging.next.link verbatim (the live API returns that link with a
+            differently-ordered path, /crm/objects/v3/contacts, which is not the
+            canonical route; the after cursor is authoritative).
+          schema:
+            type: string
+      responses:
+        "200":
+          description: One page of contact results (verified by live probe).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PageEnvelope"
+              examples:
+                listPage:
+                  summary: Live-captured first page
+                  externalValue: ./fixtures/hubspot.contacts.list_page.json
+                dirtyRecord:
+                  summary: Live-captured record with null firstname/lastname
+                  externalValue: ./fixtures/hubspot.contacts.dirty_record.json
+        "400":
+          description: >
+            Validation error, e.g. limit below 1 (live probe: category
+            VALIDATION_ERROR).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+              examples:
+                validationError:
+                  externalValue: ./fixtures/hubspot.contacts.400_validation_error.json
+        "401":
+          description: >
+            Missing or invalid access token (live probe: category
+            INVALID_AUTHENTICATION).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+              examples:
+                invalidAuth:
+                  externalValue: ./fixtures/hubspot.contacts.401_invalid_auth.json
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      description: >
+        Authorization: Bearer <access_token>, where the token is a HubSpot
+        Private App access token read from the HUBSPOT_ACCESS_TOKEN environment
+        variable. The token is static — there is no token-exchange or refresh
+        step; the same token is sent on every request.
+  schemas:
+    PageEnvelope:
+      type: object
+      description: >
+        Pagination model — cursor-based. When more pages exist, paging.next.after
+        holds the opaque cursor for the next page; re-issue the list request with
+        after set to that value. When no more pages remain, the paging object is
+        ABSENT entirely (verified by following the cursor to the final page).
+        There is no total count on the list response. Default page size is 10;
+        the integration pins the maximum of 100.
+      required: [results]
+      properties:
+        results:
+          type: array
+          items:
+            $ref: "#/components/schemas/ContactRecord"
+        paging:
+          type: object
+          description: Present only when a further page exists.
+          properties:
+            next:
+              type: object
+              required: [after]
+              properties:
+                after:
+                  type: string
+                  description: Opaque cursor for the next page.
+                link:
+                  type: string
+                  description: >
+                    A convenience URL for the next page. NOT followed by the
+                    integration — see the after parameter note; the cursor is
+                    authoritative.
+    ContactRecord:
+      type: object
+      description: >
+        One contact entry of results[]. Business fields live inside the nested
+        properties object, NOT at the top level. Id is always present and equals
+        properties.hs_object_id. Any requested property can be null (a live
+        contact was found with firstname and lastname both null). Email content
+        is NOT guaranteed to be a valid email address — the host stores the
+        mapped data verbatim and performs no validation.
+      required: [id, properties]
+      properties:
+        id:
+          type: string
+          description: Stable HubSpot record id; equals properties.hs_object_id.
+        properties:
+          type: object
+          description: >
+            The requested contact properties. Only the pinned list is requested,
+            but HubSpot also returns hs_object_id, createdate, and
+            lastmodifieddate. Each value is a string or null.
+          properties:
+            firstname:
+              type: [string, "null"]
+            lastname:
+              type: [string, "null"]
+            email:
+              type: [string, "null"]
+            jobtitle:
+              type: [string, "null"]
+            company:
+              type: [string, "null"]
+            hs_object_id:
+              type: [string, "null"]
+            createdate:
+              type: [string, "null"]
+            lastmodifieddate:
+              type: [string, "null"]
+          additionalProperties: true
+        createdAt:
+          type: [string, "null"]
+        updatedAt:
+          type: [string, "null"]
+        archived:
+          type: [boolean, "null"]
+          description: Always false on the list endpoint (archived contacts are excluded).
+        url:
+          type: [string, "null"]
+          description: HubSpot UI deep-link; not business data.
+      additionalProperties: true
+    ErrorEnvelope:
+      type: object
+      description: >
+        Every error response body is a JSON OBJECT (not an array). Verified by
+        live probes for 400 VALIDATION_ERROR and 401 INVALID_AUTHENTICATION.
+      required: [status, message, category]
+      properties:
+        status:
+          type: string
+          description: Always the literal "error".
+        message:
+          type: string
+        correlationId:
+          type: string
+        category:
+          type: string
+          description: e.g. INVALID_AUTHENTICATION, VALIDATION_ERROR.
+        context:
+          type: object
+          description: Optional per-error detail map.
+          additionalProperties: true

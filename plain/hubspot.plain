@@ -1,0 +1,43 @@
+---
+import:
+  - crm_common
+  - integration_testing
+description: "HubSpot Integration plug-in for the CRM backend. Adds src/integrations/hubspot/ so that GET /ingest/hubspot pulls Contact records from HubSpot via its REST API and stores them as contact records in the host's generic record store."
+---
+
+***definitions***
+
+- :HubSpotProvider: is the :Provider: identifier `hubspot` - the folder name `src/integrations/hubspot/`, the `source` recorded on every :Record: this integration produces, and the `provider_id` value the mapping stamps on each :Contact:.
+
+- :HubSpotIntegration: is the concrete :Integration: for :HubSpotProvider: that pulls HubSpot `Contact` records and produces :Contact: data dicts under the data_type `contact`.
+
+- :HubSpotCredentials: are the :IntegrationCredentials: for :HubSpotProvider:, used to authenticate against HubSpot with a Private App access token sent as a static bearer token, read from an environment variable.
+  - `HUBSPOT_ACCESS_TOKEN` - the HubSpot Private App access token (required)
+
+- :HubSpotRestAPI: is the exact HubSpot CRM REST API surface this integration calls, defined by [resources/hubspot/openapi.yaml](resources/hubspot/openapi.yaml).
+
+- :HubSpotContactMapping: is the field-by-field contract for converting one raw HubSpot `Contact` record into a :Contact: data dict, fully described in [resources/hubspot/contact-mapping.md](resources/hubspot/contact-mapping.md).
+
+***test reqs***
+
+- :ConformanceTests: of :HubSpotContactMapping: must generate dummy HubSpot `Contact` records based on the `ContactRecord` schema of :HubSpotRestAPI: and map each one with :HubSpotContactMapping:.
+  - Every generated record must conform to the `ContactRecord` schema of :HubSpotRestAPI:.
+  - Each mapped result must follow the :HubSpotContactMapping: contract and the :Contact: data shape.
+  - This is a pure-function check: it invokes :HubSpotContactMapping: directly on the dummy records and must not call the live API or `fetch(get_stored)`.
+
+***functional specs***
+
+- Implement a function that implements :HubSpotContactMapping: as a pure function within the integration package.
+
+- Implement :HubSpotIntegration:'s `fetch(get_stored)` entry point.
+  - Read :HubSpotCredentials: from the environment. If the required variable is missing or empty, raise `RuntimeError` with a message naming the missing environment variable key (e.g. `HUBSPOT_ACCESS_TOKEN`).
+  - Send the access token as a static bearer token on every request per the auth scheme of :HubSpotRestAPI:; there is no token-exchange or refresh step.
+  - Request the first page of active contacts from the list endpoint of :HubSpotRestAPI: with its pinned query parameters.
+  - Read every subsequent page per the pagination envelope of :HubSpotRestAPI: until all pages are read.
+  - For each record across all pages, map it with :HubSpotContactMapping: to a :Contact: data dict.
+  - Return the list of mapped :Contact: data dicts; the host stores them verbatim.
+
+- Wire :HubSpotIntegration: into the host's runtime discovery surface.
+  - `src/integrations/hubspot/__init__.py` exposes the module-level `DATA_TYPE` set to `contact` and the top-level callable `fetch` as the package's public entry point.
+    - The package's public API is declared as exactly `DATA_TYPE` and `fetch`, for example through `__all__`.
+    - Internal helper modules (such as a mapping module) are implementation details; `__init__.py` may import them, and they need not be removed from the package namespace.
