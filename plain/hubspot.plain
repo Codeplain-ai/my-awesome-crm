@@ -18,6 +18,12 @@ description: "HubSpot Integration plug-in for the CRM backend. Adds src/integrat
 
 - :HubSpotContactMapping: is the field-by-field contract for converting one raw HubSpot `Contact` record into a :Contact: data dict, fully described in [resources/hubspot/contact-mapping.md](resources/hubspot/contact-mapping.md).
 
+- :HubSpotIncrementalWatermark: is the "changed since" boundary that drives an incremental sync.
+  - It is derived from the contact records this integration has already stored.
+  - It is the latest timestamp among the host :Record: `created_at` and `updated_at` values, taken across every stored `contact` :Record: whose `source` is :HubSpotProvider:.
+  - These are the host's own row timestamps returned by the `get_stored` callback, not the provider's field values.
+  - It is absent when no such :Record: exists yet (the first sync), which selects a full sync instead of an incremental one.
+
 ***test reqs***
 
 - :ConformanceTests: of :HubSpotContactMapping: must generate dummy HubSpot `Contact` records based on the `ContactRecord` schema of :HubSpotRestAPI: and map each one with :HubSpotContactMapping:.
@@ -32,10 +38,16 @@ description: "HubSpot Integration plug-in for the CRM backend. Adds src/integrat
 - Implement :HubSpotIntegration:'s `fetch(get_stored)` entry point.
   - Read :HubSpotCredentials: from the environment. If the required variable is missing or empty, raise `RuntimeError` with a message naming the missing environment variable key (e.g. `HUBSPOT_ACCESS_TOKEN`).
   - Send the access token as a static bearer token on every request per the auth scheme of :HubSpotRestAPI:; there is no token-exchange or refresh step.
-  - Request the first page of active contacts from the list endpoint of :HubSpotRestAPI: with its pinned query parameters.
-  - Read every subsequent page per the pagination envelope of :HubSpotRestAPI: until all pages are read.
+  - Determine :HubSpotIncrementalWatermark: by calling `get_stored` for the `contact` data_type and inspecting the returned rows whose `source` is :HubSpotProvider:.
+  - When :HubSpotIncrementalWatermark: is absent, perform a full sync.
+    - Request the first page of active contacts from the list endpoint of :HubSpotRestAPI: with its pinned query parameters.
+  - When :HubSpotIncrementalWatermark: is present, perform an incremental sync.
+    - Request the first page from the search endpoint of :HubSpotRestAPI:, filtering on the contact modification date being at or after :HubSpotIncrementalWatermark:.
+    - Convert :HubSpotIncrementalWatermark: to the epoch-millisecond value the search endpoint expects.
+    - This captures both added and updated contacts, since a newly-added contact's modification date equals its creation date.
+  - Read every subsequent page per the pagination envelope of :HubSpotRestAPI: until all pages are read, using whichever endpoint the selected sync mode uses.
   - For each record across all pages, map it with :HubSpotContactMapping: to a :Contact: data dict.
-  - Return the list of mapped :Contact: data dicts; the host stores them verbatim.
+  - Return the list of mapped :Contact: data dicts; the host stores them verbatim and upserts them, so an incremental run updates changed contacts and adds new ones.
 
 - Wire :HubSpotIntegration: into the host's runtime discovery surface.
   - `src/integrations/hubspot/__init__.py` exposes the module-level `DATA_TYPE` set to `contact` and the top-level callable `fetch` as the package's public entry point.
@@ -43,7 +55,7 @@ description: "HubSpot Integration plug-in for the CRM backend. Adds src/integrat
     - Internal helper modules (such as a mapping module) are implementation details; `__init__.py` may import them, and they need not be removed from the package namespace.
 
 - Wrap every HubSpot API request made by :HubSpotIntegration: in an exponential-backoff retry policy.
-  - This covers the list request and every paginated follow-up request to the list endpoint of :HubSpotRestAPI:.
+  - This covers every request to :HubSpotRestAPI: and every paginated follow-up request, whether the sync uses the list endpoint or the search endpoint.
   - A request is retried only on transient failures.
     - Transient failures are HTTP status 429, 500, 502, 503, and 504.
     - Transient failures also include network and transport errors, such as a connection failure or a request timeout.

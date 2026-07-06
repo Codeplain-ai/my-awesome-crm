@@ -86,6 +86,51 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorEnvelope"
+  /crm/v3/objects/contacts/search:
+    post:
+      operationId: searchContacts
+      summary: Search Contact records changed since a watermark (incremental sync)
+      description: >
+        Used by the incremental sync path. Returns contacts whose
+        lastmodifieddate is at or after a watermark, so both newly-added and
+        updated contacts are captured (a new contact's lastmodifieddate equals
+        its createdate). This is a POST, but read-only — it queries, it does not
+        mutate. Verified against the live API. Note the format asymmetry: the
+        filter value is epoch MILLISECONDS (a string), while the
+        lastmodifieddate returned inside each record is ISO-8601 (see
+        ContactRecord). Pagination is the same cursor model as the list endpoint
+        (paging.next.after), and the response additionally carries total. The
+        search index caps total results at 10000 and applies stricter rate
+        limits than the list endpoint.
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SearchRequest"
+      responses:
+        "200":
+          description: One page of search results (verified by live probe).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SearchEnvelope"
+        "400":
+          description: >
+            Malformed request, e.g. a filter value outside the accepted range
+            (live probe: an out-of-range epoch value returns 400).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+        "401":
+          description: Missing or invalid access token.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
 components:
   securitySchemes:
     bearerAuth:
@@ -129,6 +174,101 @@ components:
                     A convenience URL for the next page. NOT followed by the
                     integration — see the after parameter note; the cursor is
                     authoritative.
+    SearchRequest:
+      type: object
+      description: >
+        Request body for the incremental search. The integration pins the same
+        property list as the list endpoint and sorts ascending by
+        lastmodifieddate so pagination is stable. The single filter selects
+        contacts changed at or after the watermark.
+      required: [filterGroups, properties, limit]
+      properties:
+        filterGroups:
+          type: array
+          description: >
+            One filter group holding one filter: lastmodifieddate GTE the
+            watermark. A single group means all its filters are ANDed; one filter
+            is all the integration needs. HubSpot allows at most 5 groups and 18
+            filters total.
+          items:
+            type: object
+            required: [filters]
+            properties:
+              filters:
+                type: array
+                items:
+                  type: object
+                  required: [propertyName, operator, value]
+                  properties:
+                    propertyName:
+                      type: string
+                      const: lastmodifieddate
+                    operator:
+                      type: string
+                      const: GTE
+                    value:
+                      type: string
+                      description: >
+                        The watermark as epoch MILLISECONDS, serialized as a
+                        string (e.g. "1782894939000"). NOT ISO-8601 — that is the
+                        output format only. Absurdly out-of-range values return
+                        400 (verified by live probe).
+        properties:
+          type: array
+          description: Same pinned property list as the list endpoint.
+          items:
+            type: string
+          const: [firstname, lastname, email, jobtitle, company]
+        sorts:
+          type: array
+          description: >
+            Sort ascending by lastmodifieddate for stable pagination across
+            pages.
+          items:
+            type: object
+            properties:
+              propertyName:
+                type: string
+                const: lastmodifieddate
+              direction:
+                type: string
+                const: ASCENDING
+        limit:
+          type: integer
+          description: >
+            Page size. Pinned to 100. The search endpoint accepts up to 200.
+          const: 100
+        after:
+          type: string
+          description: >
+            Opaque pagination cursor from paging.next.after of the previous
+            page. Absent on the first request.
+    SearchEnvelope:
+      type: object
+      description: >
+        Search response. Same cursor pagination as PageEnvelope (paging is ABSENT
+        on the final page), but additionally carries total — the count of
+        matching contacts (the search index caps this at 10000).
+      required: [total, results]
+      properties:
+        total:
+          type: integer
+          description: Total number of matching contacts (capped at 10000).
+        results:
+          type: array
+          items:
+            $ref: "#/components/schemas/ContactRecord"
+        paging:
+          type: object
+          description: Present only when a further page exists.
+          properties:
+            next:
+              type: object
+              required: [after]
+              properties:
+                after:
+                  type: string
+                  description: Opaque cursor for the next page.
     ContactRecord:
       type: object
       description: >
