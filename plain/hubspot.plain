@@ -41,3 +41,17 @@ description: "HubSpot Integration plug-in for the CRM backend. Adds src/integrat
   - `src/integrations/hubspot/__init__.py` exposes the module-level `DATA_TYPE` set to `contact` and the top-level callable `fetch` as the package's public entry point.
     - The package's public API is declared as exactly `DATA_TYPE` and `fetch`, for example through `__all__`.
     - Internal helper modules (such as a mapping module) are implementation details; `__init__.py` may import them, and they need not be removed from the package namespace.
+
+- Wrap every HubSpot API request made by :HubSpotIntegration: in an exponential-backoff retry policy.
+  - This covers the list request and every paginated follow-up request to the list endpoint of :HubSpotRestAPI:.
+  - A request is retried only on transient failures.
+    - Transient failures are HTTP status 429, 500, 502, 503, and 504.
+    - Transient failures also include network and transport errors, such as a connection failure or a request timeout.
+  - All other outcomes are not retried.
+    - A 2xx response is a success and is returned to the caller.
+    - Any other 4xx response (for example 400, 401, 403, or 404) fails immediately without retry.
+  - Between attempts the integration waits with exponential backoff.
+    - The wait starts at 1 second and doubles each time (1s, 2s, 4s, 8s).
+  - A request is attempted at most 5 times in total: the initial attempt plus 4 retries.
+  - When the final attempt still fails, the last error propagates out of `fetch(get_stored)`.
+    - No records are returned in that case.
