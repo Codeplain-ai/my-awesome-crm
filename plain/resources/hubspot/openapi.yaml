@@ -131,6 +131,97 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorEnvelope"
+  /crm/v3/objects/companies:
+    get:
+      operationId: listCompanies
+      summary: List (page) active Company records
+      description: >
+        Returns one page of active (non-archived) companies. Same envelope and
+        cursor pagination as the contacts list endpoint. The integration pins
+        limit=100 and the fixed property list below. Verified against the live
+        API. NOTE: companies expose their modification date as
+        hs_lastmodifieddate — NOT lastmodifieddate as contacts do.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: limit
+          in: query
+          required: true
+          schema:
+            type: integer
+            const: 100
+        - name: properties
+          in: query
+          required: true
+          description: Fixed company property list requested by the integration.
+          schema:
+            type: string
+            const: name,domain,industry
+        - name: after
+          in: query
+          required: false
+          description: >
+            Opaque pagination cursor from paging.next.after of the previous page;
+            absent on the first request. Followed against this same path.
+          schema:
+            type: string
+      responses:
+        "200":
+          description: One page of company results (verified by live probe).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CompanyPageEnvelope"
+        "400":
+          description: Validation error (e.g. limit below 1).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+        "401":
+          description: Missing or invalid access token.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+  /crm/v3/objects/companies/search:
+    post:
+      operationId: searchCompanies
+      summary: Search Company records changed since a watermark (incremental account sync)
+      description: >
+        The account analogue of the contacts search endpoint. Returns companies
+        whose hs_lastmodifieddate is at or after a watermark. CRITICAL: companies
+        filter and sort on hs_lastmodifieddate, NOT lastmodifieddate (that
+        property is contacts-only). Same POST-but-read-only, same epoch-ms filter
+        value vs ISO-8601 output asymmetry, same cursor pagination and total as
+        the contacts search endpoint.
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CompanySearchRequest"
+      responses:
+        "200":
+          description: One page of company search results.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CompanySearchEnvelope"
+        "400":
+          description: Malformed request (e.g. a filter value outside the accepted range).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+        "401":
+          description: Missing or invalid access token.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
 components:
   securitySchemes:
     bearerAuth:
@@ -318,6 +409,151 @@ components:
           type: [string, "null"]
           description: HubSpot UI deep-link; not business data.
       additionalProperties: true
+    CompanyPageEnvelope:
+      type: object
+      description: >
+        Company list response. Same cursor pagination as PageEnvelope — paging is
+        ABSENT on the final page.
+      required: [results]
+      properties:
+        results:
+          type: array
+          items:
+            $ref: "#/components/schemas/CompanyRecord"
+        paging:
+          type: object
+          description: Present only when a further page exists.
+          properties:
+            next:
+              type: object
+              required: [after]
+              properties:
+                after:
+                  type: string
+                  description: Opaque cursor for the next page.
+    CompanyRecord:
+      type: object
+      description: >
+        One company entry of results[]. Business fields live inside the nested
+        properties object. Id is always present and equals
+        properties.hs_object_id. Any requested property can be null (a live
+        company was found with name null). The modification date is exposed as
+        hs_lastmodifieddate — NOT lastmodifieddate.
+      required: [id, properties]
+      properties:
+        id:
+          type: string
+          description: Stable HubSpot record id; equals properties.hs_object_id.
+        properties:
+          type: object
+          description: >
+            The requested company properties. Only the pinned list is requested,
+            but HubSpot also returns hs_object_id, createdate, and
+            hs_lastmodifieddate. Each value is a string or null.
+          properties:
+            name:
+              type: [string, "null"]
+            domain:
+              type: [string, "null"]
+            industry:
+              type: [string, "null"]
+            hs_object_id:
+              type: [string, "null"]
+            createdate:
+              type: [string, "null"]
+            hs_lastmodifieddate:
+              type: [string, "null"]
+          additionalProperties: true
+        createdAt:
+          type: [string, "null"]
+        updatedAt:
+          type: [string, "null"]
+        archived:
+          type: [boolean, "null"]
+          description: Always false on the list endpoint (archived companies are excluded).
+        url:
+          type: [string, "null"]
+          description: HubSpot UI deep-link; not business data.
+      additionalProperties: true
+    CompanySearchRequest:
+      type: object
+      description: >
+        Request body for the incremental company search. Mirrors SearchRequest
+        but filters and sorts on hs_lastmodifieddate (companies' modification
+        property), and pins the company property list.
+      required: [filterGroups, properties, limit]
+      properties:
+        filterGroups:
+          type: array
+          items:
+            type: object
+            required: [filters]
+            properties:
+              filters:
+                type: array
+                items:
+                  type: object
+                  required: [propertyName, operator, value]
+                  properties:
+                    propertyName:
+                      type: string
+                      const: hs_lastmodifieddate
+                    operator:
+                      type: string
+                      const: GTE
+                    value:
+                      type: string
+                      description: >
+                        The watermark as epoch MILLISECONDS, serialized as a
+                        string. NOT ISO-8601 — that is the output format only.
+        properties:
+          type: array
+          description: Same pinned property list as the companies list endpoint.
+          items:
+            type: string
+          const: [name, domain, industry]
+        sorts:
+          type: array
+          items:
+            type: object
+            properties:
+              propertyName:
+                type: string
+                const: hs_lastmodifieddate
+              direction:
+                type: string
+                const: ASCENDING
+        limit:
+          type: integer
+          const: 100
+        after:
+          type: string
+          description: Opaque pagination cursor; absent on the first request.
+    CompanySearchEnvelope:
+      type: object
+      description: >
+        Company search response. Same shape as SearchEnvelope: total plus results
+        of CompanyRecord, with paging ABSENT on the final page.
+      required: [total, results]
+      properties:
+        total:
+          type: integer
+          description: Total number of matching companies (capped at 10000).
+        results:
+          type: array
+          items:
+            $ref: "#/components/schemas/CompanyRecord"
+        paging:
+          type: object
+          description: Present only when a further page exists.
+          properties:
+            next:
+              type: object
+              required: [after]
+              properties:
+                after:
+                  type: string
+                  description: Opaque cursor for the next page.
     ErrorEnvelope:
       type: object
       description: >

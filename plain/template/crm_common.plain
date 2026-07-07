@@ -27,6 +27,15 @@ description: Shared concepts and tech-stack implementation reqs for the CRM host
   - company_name - free-form company name (conventional)
   - custom_fields - free-form JSON object for fields that do not fit the shape above (conventional, defaults to empty object)
 
+- :Account: is the conventional shape of the `data` payload for a :Record: whose data_type is "account".
+  - Like :Contact:, it is a plain JSON object - not a host-validated model; the host stores it verbatim, so these fields are a convention integrations follow, not a contract the host enforces.
+  - provider_id - the :Provider: identifier the account came from (conventional)
+  - external_id - the record's id in the source :Provider: (conventional)
+  - name - the account or company display name (conventional)
+  - domain - the account's primary web domain (conventional)
+  - industry - the account's industry (conventional)
+  - custom_fields - free-form JSON object for fields that do not fit the shape above (conventional, defaults to empty object)
+
 - :Integration: is a runtime-discovered plug-in that pulls records out of a particular :Provider:.
   - One :Integration: corresponds to one :Provider: identifier, which is recorded as the `source` of every :Record: it produces.
   - The host logic that discovers integrations and invokes them in the ingest workflow is [ingest.py](../src/services/ingest.py) - imported from the host codebase; do not redefine or modify it.
