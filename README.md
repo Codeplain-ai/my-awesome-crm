@@ -48,6 +48,10 @@ Honor that contract and the host picks you up automatically. 🎉
 
 You don't hand-write the integration code — you write a **[\*\*\*plain](https://plainlang.org)** spec and let the renderer generate it. Each provider is a `.plain` module under `plain/` (e.g. `plain/salesforce.plain`) that describes *what* the integration does; the generated plug-in lands in `src/integrations/<provider>/`. The `.plain` specs are the source of truth — the code under `src/integrations/` is a read-only artifact, so you change behavior by editing the spec and re-rendering, never by editing the generated files.
 
+### 🎓 Want to add your own integration?
+
+This repo doubles as a hands-on **workshop**. Follow **[docs/EXERCISE.md](docs/EXERCISE.md)** to use *integration-forge* (the agent skill pack) to build a HubSpot contacts integration from prompts, then extend it to sync accounts.
+
 ## 🧰 Built with
 
 - ⚡ **FastAPI** — the web framework
