@@ -134,9 +134,8 @@ Author the OpenAPI file **first**, from the live cross-check, and put **everythi
 / token endpoint with its request body, the query endpoint with the pinned query string as a schema
 `const`, required headers, the API-version pin **with the reason**, the pagination envelope and its
 mechanics, the record schema (with dirty-data annotations like "Email is NOT guaranteed valid"), the
-error envelope, every docs-vs-live discrepancy ("live API wins"), and the saved probe fixtures wired
-in via `examples.externalValue` — so the schema, fixtures, and `rest-crosscheck.md` form one
-auditable bundle. Define `:<Provider>RestAPI:` in `***definitions***` carrying the **only** link to
+error envelope, and every docs-vs-live discrepancy ("live API wins"). Define `:<Provider>RestAPI:`
+in `***definitions***` carrying the **only** link to
 the file; spec text then says "the token endpoint / query endpoint / pagination envelope of
 `:<Provider>RestAPI:`" and **never** restates URLs, headers, fields, status codes, or continuation
 markers (`nextRecordsUrl`, `@odata.nextLink`) inline. The pagination spec line is one sentence —
