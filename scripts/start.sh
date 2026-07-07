@@ -2,7 +2,7 @@
 #
 # start.sh — one-shot getting-started + run script for My Awesome CRM.
 #
-# Idempotent: on first run it bootstraps everything (Python 3.12, virtualenv,
+# Idempotent: on first run it bootstraps everything (Python >= 3.12, virtualenv,
 # dependencies) and starts the server; on subsequent runs it detects that the
 # environment is already set up and just starts the server.
 #
@@ -22,7 +22,11 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 VENV_DIR="$PROJECT_ROOT/.venv"
 REQUIREMENTS="$PROJECT_ROOT/requirements.txt"
-PYTHON_VERSION="3.12"
+# Minimum supported Python. Any interpreter at this version or newer is accepted;
+# this exact version is only used as the target when we have to auto-install one.
+MIN_PYTHON_VERSION="3.12"
+MIN_PYTHON_MAJOR="3"
+MIN_PYTHON_MINOR="12"
 
 cd "$PROJECT_ROOT"
 
@@ -35,81 +39,87 @@ warn()  { printf '\033[0;33m  ! \033[0m%s\n' "$*"; }
 error() { printf '\033[0;31mERROR:\033[0m %s\n' "$*" >&2; }
 
 # ---------------------------------------------------------------------------
-# 1. Ensure Python 3.12 is available.
+# 1. Ensure Python >= 3.12 is available.
 # ---------------------------------------------------------------------------
-find_python312() {
-    # Prefer the version-specific launcher, then fall back to plain python3.
-    if command -v "python$PYTHON_VERSION" >/dev/null 2>&1; then
-        echo "python$PYTHON_VERSION"
-        return 0
-    fi
-    if command -v python3 >/dev/null 2>&1; then
-        if python3 -c 'import sys; sys.exit(0 if sys.version_info[:2] == (3, 12) else 1)' 2>/dev/null; then
-            echo "python3"
+# Returns 0 if the given interpreter reports a version >= the minimum.
+python_meets_min() {
+    "$1" -c "import sys; sys.exit(0 if sys.version_info[:2] >= ($MIN_PYTHON_MAJOR, $MIN_PYTHON_MINOR) else 1)" 2>/dev/null
+}
+
+find_python() {
+    # Try, in order: version-specific launchers from newest known down to the
+    # minimum, then the generic python3 / python. First one meeting the minimum
+    # wins. This makes the script agnostic to the exact 3.x that's installed.
+    local candidate
+    for candidate in \
+        python3.15 python3.14 python3.13 "python$MIN_PYTHON_VERSION" \
+        python3 python; do
+        if command -v "$candidate" >/dev/null 2>&1 && python_meets_min "$candidate"; then
+            echo "$candidate"
             return 0
         fi
-    fi
+    done
     return 1
 }
 
-install_python312() {
+install_python() {
     case "$(uname -s)" in
         Darwin)
             if ! command -v brew >/dev/null 2>&1; then
-                error "Homebrew is required to auto-install Python $PYTHON_VERSION but was not found."
+                error "Homebrew is required to auto-install Python $MIN_PYTHON_VERSION but was not found."
                 error "Install Homebrew from https://brew.sh and re-run this script."
                 exit 1
             fi
-            info "Installing Python $PYTHON_VERSION via Homebrew..."
-            brew install "python@$PYTHON_VERSION"
+            info "Installing Python $MIN_PYTHON_VERSION via Homebrew..."
+            brew install "python@$MIN_PYTHON_VERSION"
             # Homebrew's python@3.12 is keg-only: its `python3.12` binary lives in
             # the formula's opt bin and may not be on PATH yet. Add it so the
-            # follow-up find_python312 call can locate it (works on both Apple
+            # follow-up find_python call can locate it (works on both Apple
             # Silicon /opt/homebrew and Intel /usr/local prefixes).
             local brew_prefix
-            brew_prefix="$(brew --prefix "python@$PYTHON_VERSION" 2>/dev/null || true)"
+            brew_prefix="$(brew --prefix "python@$MIN_PYTHON_VERSION" 2>/dev/null || true)"
             if [ -n "$brew_prefix" ] && [ -d "$brew_prefix/bin" ]; then
                 export PATH="$brew_prefix/bin:$PATH"
             fi
             ;;
         Linux)
             if command -v apt-get >/dev/null 2>&1; then
-                info "Installing Python $PYTHON_VERSION via apt-get..."
+                info "Installing Python $MIN_PYTHON_VERSION via apt-get..."
                 sudo apt-get update
-                sudo apt-get install -y "python$PYTHON_VERSION" "python$PYTHON_VERSION-venv"
+                sudo apt-get install -y "python$MIN_PYTHON_VERSION" "python$MIN_PYTHON_VERSION-venv"
             elif command -v dnf >/dev/null 2>&1; then
-                info "Installing Python $PYTHON_VERSION via dnf..."
-                sudo dnf install -y "python$PYTHON_VERSION"
+                info "Installing Python $MIN_PYTHON_VERSION via dnf..."
+                sudo dnf install -y "python$MIN_PYTHON_VERSION"
             else
-                error "No supported package manager (apt-get/dnf) found to install Python $PYTHON_VERSION."
+                error "No supported package manager (apt-get/dnf) found to install Python $MIN_PYTHON_VERSION."
                 exit 1
             fi
             ;;
         *)
-            error "Automatic Python install is not supported on this OS. Please install Python $PYTHON_VERSION manually."
+            error "Automatic Python install is not supported on this OS. Please install Python $MIN_PYTHON_VERSION manually."
             exit 1
             ;;
     esac
 }
 
-info "Checking for Python $PYTHON_VERSION..."
-if PYTHON_BIN="$(find_python312)"; then
+info "Checking for Python >= $MIN_PYTHON_VERSION..."
+if PYTHON_BIN="$(find_python)"; then
     ok "Found: $($PYTHON_BIN --version 2>&1)"
 else
-    warn "Python $PYTHON_VERSION is not installed."
-    read -r -p "Install Python $PYTHON_VERSION now? [y/N] " reply
+    warn "No Python >= $MIN_PYTHON_VERSION was found."
+    read -r -p "Install Python $MIN_PYTHON_VERSION now? [y/N] " reply
     case "$reply" in
         [yY][eE][sS]|[yY])
-            install_python312
-            if PYTHON_BIN="$(find_python312)"; then
+            install_python
+            if PYTHON_BIN="$(find_python)"; then
                 ok "Installed: $($PYTHON_BIN --version 2>&1)"
             else
-                error "Python $PYTHON_VERSION still not found after install. Please install it manually."
+                error "Python >= $MIN_PYTHON_VERSION still not found after install. Please install it manually."
                 exit 1
             fi
             ;;
         *)
-            error "Python $PYTHON_VERSION is required to run this project. Aborting."
+            error "Python >= $MIN_PYTHON_VERSION is required to run this project. Aborting."
             exit 1
             ;;
     esac

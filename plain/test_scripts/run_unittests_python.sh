@@ -15,13 +15,24 @@
 
 set -u
 
-# Step 1 - toolchain check (pin to Python 3.12 - SQLModel does not yet support PEP 649 lazy annotations in 3.14+)
-if command -v python3.12 >/dev/null 2>&1; then
-    PY=python3.12
-elif command -v python3.13 >/dev/null 2>&1; then
-    PY=python3.13
-else
-    echo "Error: python3.12 (or 3.13) is required but not on PATH." >&2
+# Step 1 - toolchain check. Any Python >= 3.12 is accepted (version-agnostic).
+# Each candidate is version-checked, not just probed for existence, so a launcher
+# aliased to an older Python (e.g. python3 -> 3.9) is skipped rather than wrongly
+# selected. Newer launchers are preferred over older ones.
+MIN_PY_MAJOR=3
+MIN_PY_MINOR=12
+py_meets_min() {
+    "$1" -c "import sys; sys.exit(0 if sys.version_info[:2] >= ($MIN_PY_MAJOR, $MIN_PY_MINOR) else 1)" 2>/dev/null
+}
+PY=""
+for cand in python3.15 python3.14 python3.13 python3.12 python3 python; do
+    if command -v "$cand" >/dev/null 2>&1 && py_meets_min "$cand"; then
+        PY="$cand"
+        break
+    fi
+done
+if [ -z "$PY" ]; then
+    echo "Error: a Python >= $MIN_PY_MAJOR.$MIN_PY_MINOR interpreter is required but none was found on PATH." >&2
     exit 69
 fi
 

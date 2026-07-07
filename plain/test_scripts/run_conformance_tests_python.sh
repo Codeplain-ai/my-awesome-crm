@@ -42,14 +42,24 @@ banner() { printf '\n===== %s =====\n' "$1"; }
 
 # ----- [1/8] Toolchain check ------------------------------------------------
 banner "[1/8] Toolchain check"
-if command -v python3.12 >/dev/null 2>&1; then
-    PYTHON_CMD=python3.12
-elif command -v python3.13 >/dev/null 2>&1; then
-    PYTHON_CMD=python3.13
-elif command -v python3 >/dev/null 2>&1; then
-    PYTHON_CMD=python3
-else
-    printf "Error: Python 3.12+ interpreter not found. Please install Python.\n" >&2
+# Any Python >= 3.12 is accepted (version-agnostic). Each candidate is
+# version-checked, not just probed for existence, so a launcher aliased to an
+# older Python (e.g. python3 -> 3.9) is skipped rather than wrongly selected.
+# Newer launchers are preferred over older ones.
+MIN_PY_MAJOR=3
+MIN_PY_MINOR=12
+py_meets_min() {
+    "$1" -c "import sys; sys.exit(0 if sys.version_info[:2] >= ($MIN_PY_MAJOR, $MIN_PY_MINOR) else 1)" 2>/dev/null
+}
+PYTHON_CMD=""
+for cand in python3.15 python3.14 python3.13 python3.12 python3 python; do
+    if command -v "$cand" >/dev/null 2>&1 && py_meets_min "$cand"; then
+        PYTHON_CMD="$cand"
+        break
+    fi
+done
+if [ -z "$PYTHON_CMD" ]; then
+    printf "Error: a Python >= %s.%s interpreter is required but none was found on PATH.\n" "$MIN_PY_MAJOR" "$MIN_PY_MINOR" >&2
     exit $UNRECOVERABLE_ERROR_EXIT_CODE
 fi
 printf "Python interpreter: %s (%s)\n" "$PYTHON_CMD" "$(command -v "$PYTHON_CMD")"
