@@ -150,5 +150,16 @@ cd "$HOST_CODEBASE_ROOT" || {
 }
 
 echo "Running pytest in $HOST_CODEBASE_ROOT for: ${TEST_TARGETS[*]}"
-PYTHONPATH="$HOST_CODEBASE_ROOT" "$VENV_DIR/bin/pytest" -q --import-mode=importlib "${TEST_TARGETS[@]}"
+PYTHONPATH="$HOST_CODEBASE_ROOT" "$VENV_DIR/bin/pytest" \
+    -vv \
+    -rA \
+    -l \
+    -s \
+    --tb=long \
+    --durations=0 \
+    --color=yes \
+    -o log_cli=true \
+    --log-cli-level=DEBUG \
+    --import-mode=importlib \
+    "${TEST_TARGETS[@]}"
 exit $?

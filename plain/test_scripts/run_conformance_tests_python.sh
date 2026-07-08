@@ -229,7 +229,18 @@ cd "$WORKING_FOLDER" 2>/dev/null || {
 # PYTHONPATH=ROOT => `from src.integrations.<name> import ...` resolves to the
 # implementation code in the host root, not anything under .tmp.
 export PYTHONPATH="$HOST_CODEBASE_ROOT${PYTHONPATH:+:$PYTHONPATH}"
-TEST_CMD=("$VENV_PY" -m pytest -v --import-mode=importlib -p no:cacheprovider \
+TEST_CMD=("$VENV_PY" -m pytest \
+          -vv \
+          -rA \
+          -l \
+          -s \
+          --tb=long \
+          --durations=0 \
+          --color=yes \
+          -o log_cli=true \
+          --log-cli-level=DEBUG \
+          --import-mode=importlib \
+          -p no:cacheprovider \
           --basetemp="$WORKING_FOLDER/.pytest_tmp" \
           "$WORKING_FOLDER")
 
@@ -241,8 +252,18 @@ output=$("${TEST_CMD[@]}" 2>&1)
 exit_code=$?
 echo "$output"
 
+# The verbose flags above (-s, -rA, log_cli=DEBUG) let test output and live log
+# lines land in $output - any of which could contain strings like "3 failed" or
+# "no tests ran". So DO NOT grep the whole stream for the verdict. Instead pull
+# out pytest's final summary bar (the "===== N passed/failed ... in Xs ====="
+# line, always last), strip ANSI color, and judge only that line.
+summary_line=$(printf '%s\n' "$output" \
+    | sed 's/\x1b\[[0-9;]*m//g' \
+    | grep -E '^=+.*=+$' \
+    | tail -n 1)
+
 # pytest exit 5 == no tests collected. Strict no-tests guard.
-if [ "$exit_code" -eq 5 ] || echo "$output" | grep -qiE "no tests ran"; then
+if [ "$exit_code" -eq 5 ] || printf '%s' "$summary_line" | grep -qiE "no tests ran"; then
     printf "\nError: No conformance tests discovered in %s.\n" "$WORKING_FOLDER" >&2
     printf "Failure context: cwd=%s current_dir=%s tests=%s\n" \
         "$(pwd)" "$current_dir" "$ABS_TESTS_FOLDER" >&2
@@ -250,7 +271,7 @@ if [ "$exit_code" -eq 5 ] || echo "$output" | grep -qiE "no tests ran"; then
 fi
 
 # Strict pass criteria: clean exit AND zero failures / errors / skipped.
-if [ "$exit_code" -ne 0 ] || echo "$output" | grep -qiE "[0-9]+ (failed|error|skipped|xfailed|xpassed)"; then
+if [ "$exit_code" -ne 0 ] || printf '%s' "$summary_line" | grep -qiE "[0-9]+ (failed|error|skipped|xfailed|xpassed)"; then
     printf "\nError: conformance run did not pass cleanly (exit %s).\n" "$exit_code" >&2
     printf "All conformance tests must pass with zero failures, errors, and skips.\n" >&2
     printf "Failure context: cwd=%s current_dir=%s tests=%s PYTHONPATH=%s\n" \
