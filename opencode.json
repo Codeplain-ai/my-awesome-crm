@@ -1,17 +1,4 @@
 {
   "$schema": "https://opencode.ai/config.json",
-  "instructions": [
-    ".opencode/rules/*.md",
-    ".opencode/skills/load-plain-reference/SKILL.md",
-    "README.md",
-    "plain/salesforce.plain",
-    "plain/template/crm_common.plain",
-    "plain/template/integration_testing.plain",
-    "src/models/schemas.py",
-    "src/services/ingest.py",
-    "requirements.txt",
-    "plain/config.yaml",
-    "plain/resources/salesforce/openapi.yaml",
-    "plain/resources/salesforce/contact-mapping.md"
-  ]
+  "instructions": [".opencode/rules/*.md"]
 }

@@ -338,3 +338,11 @@ separately by `.claude/hooks/load-integration-context.sh`. Paths are relative to
 @plain/config.yaml
 @plain/resources/salesforce/openapi.yaml
 @plain/resources/salesforce/contact-mapping.md
+
+<!-- BEGIN plain-forge (managed) -->
+## ***plain authoring rules (plain-forge)
+
+When creating or editing `.plain` specification files, first read and follow
+every rule file matching `.agents/rules/*.md`. Each file covers one section or topic of
+the ***plain language; they are installed and maintained by plain-forge.
+<!-- END plain-forge (managed) -->
