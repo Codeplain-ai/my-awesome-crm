@@ -1,7 +1,7 @@
 ---
 description: Rules for linking external resources from .plain specs
 paths:
-  - "**/*.plain"
+  - "**/*"
 ---
 
 # Rules for linked resources in `.plain` files

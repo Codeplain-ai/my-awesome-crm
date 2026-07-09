@@ -1,7 +1,7 @@
 ---
 description: Line-length and bullet-continuation rules for every section in .plain files
 paths:
-  - "**/*.plain"
+  - "**/*"
 ---
 
 # Rules for line length in `.plain` files

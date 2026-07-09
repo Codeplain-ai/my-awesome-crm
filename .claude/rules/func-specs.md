@@ -1,7 +1,7 @@
 ---
 description: Rules for writing ***functional specs*** and ***acceptance tests*** in .plain files
 paths:
-  - "**/*.plain"
+  - "**/*"
 ---
 
 # Rules for writing `***functional specs***`

@@ -1,7 +1,7 @@
 ---
 description: Rules for authoring the three test scripts that an embedded ***plain integration ships
 paths:
-  - "**/*.plain"
+  - "**/*"
 ---
 
 # Rules for embedded-integration test scripts

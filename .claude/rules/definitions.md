@@ -1,7 +1,7 @@
 ---
 description: Rules for writing ***definitions*** sections in .plain files
 paths:
-  - "**/*.plain"
+  - "**/*"
 ---
 
 # Rules for writing `***definitions***`

@@ -1,7 +1,7 @@
 ---
 description: Rules for using required_concepts in .plain files
 paths:
-  - "**/*.plain"
+  - "**/*"
 ---
 
 # Rules for `required_concepts`

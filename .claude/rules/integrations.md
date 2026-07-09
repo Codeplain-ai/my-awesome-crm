@@ -1,7 +1,7 @@
 ---
 description: Rules for authoring ***plain specs for REST API integrations
 paths:
-  - "**/*.plain"
+  - "**/*"
 ---
 
 # Rules for writing integration specs in `***plain`
