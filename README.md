@@ -48,6 +48,28 @@ Honor that contract and the host picks you up automatically. 🎉
 
 You don't hand-write the integration code — you write a **[\*\*\*plain](https://plainlang.org)** spec and let the renderer generate it. Each provider is a `.plain` module under `plain/` (e.g. `plain/salesforce.plain`) that describes *what* the integration does; the generated plug-in lands in `src/integrations/<provider>/`. The `.plain` specs are the source of truth — the code under `src/integrations/` is a read-only artifact, so you change behavior by editing the spec and re-rendering, never by editing the generated files.
 
+### ▶️ Rendering a spec
+
+You render from the `plain/` folder: `codeplain` reads a module (e.g. `hubspot.plain`) and (re)generates its plug-in under `src/integrations/<provider>/`. Editing the spec and re-rendering is the *only* supported way to change an integration — never touch the generated files.
+
+Prerequisites: the `codeplain` CLI on your `PATH` and a `CODEPLAIN_API_KEY` exported in your environment.
+
+**macOS / Linux (the default).** The checked-in `config.yaml` wires up the Bash test-runner scripts (`test_scripts/*.sh`), so there's nothing extra to pass:
+
+```bash
+cd plain
+codeplain hubspot.plain
+```
+
+> Add `--dry-run` to preview a render without generating any code.
+
+**Windows.** Run it from **PowerShell** and point `codeplain` at the Windows config, `config.pwsh.yaml`, which wires up the PowerShell test-runner scripts (`test_scripts/*.ps1`) in place of the Bash ones:
+
+```powershell
+cd plain
+codeplain hubspot.plain --config-name config.pwsh.yaml
+```
+
 ### 🎓 Want to add your own integration?
 
 This repo doubles as a hands-on **workshop**. Follow **[docs/EXERCISE.md](docs/EXERCISE.md)** to use *integration-forge* (the agent skill pack) to build a HubSpot contacts integration from prompts, then extend it to sync accounts.

@@ -1,0 +1,4 @@
+unittests-script: test_scripts/run_unittests_python.ps1
+conformance-tests-script: test_scripts/run_conformance_tests_python.ps1
+template-dir: template
+verbose: true
