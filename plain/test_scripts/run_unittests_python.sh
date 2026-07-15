@@ -102,9 +102,11 @@ if [ "${#TEST_TARGETS[@]}" -eq 0 ]; then
     exit 1
 fi
 
-# Step 5 - dependency environment. Keep the host source tree clean by housing
-# the venv under plain/.tmp/ rather than inside the host repo.
-VENV_DIR="$PLAIN_DIR/.tmp/venv"
+# Step 5 - dependency environment. Keep the host source tree and the project
+# clean by housing the venv in the system temp directory (an absolute path)
+# rather than inside the repo. The host-root basename keeps the path stable
+# across runs so the venv is reused.
+VENV_DIR="/tmp/python_unittests_$(basename "$HOST_CODEBASE_ROOT")/venv"
 CREATED_VENV=0
 if [ ! -x "$VENV_DIR/bin/python" ]; then
     echo "Creating venv at $VENV_DIR"

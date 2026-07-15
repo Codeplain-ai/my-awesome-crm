@@ -9,15 +9,16 @@
 #   mvn install from ROOT (host + impl)     | overlay $1 (generated impl) into the
 #     -> artifact in ~/.m2                  |   host ROOT src/integrations/<name>/,
 #                                           |   install ROOT requirements.txt
-#   cd .tmp/java_conformance && mvn install | stage $2 into .tmp/python_conformance,
+#   cd .tmp/java_conformance && mvn install | stage $2 into a system-temp folder,
 #     -> resolve conformance deps           |   install the conformance suite's deps
-#   mvn test (impl from ~/.m2)              | cd .tmp/python_conformance && pytest
+#   mvn test (impl from ~/.m2)              | cd <system temp>/... && pytest
 #                                           |   with PYTHONPATH=ROOT so the ROOT impl
 #                                           |   code is what gets imported
 #
 # $1 (build folder) is overlaid into the host root per the embedded contract
 # (scoped to the module's own package dir). $2 (conformance tests) is copied
-# into .tmp and run from there, leaving the authored test tree pristine.
+# into a working folder in the system temp directory and run from there, leaving
+# the authored test tree pristine.
 #
 #   Usage: run_conformance_tests_python.sh <build_folder> <conformance_tests_folder>
 #
@@ -164,9 +165,13 @@ while IFS= read -r line || [ -n "$line" ]; do
     fi
 done < "$ENV_FILE"
 
-# ----- [6/8] Stage conformance tests into .tmp ------------------------------
+# ----- [6/8] Stage conformance tests into a system-temp working folder ------
 banner "[6/8] Stage conformance tests into working folder"
-WORKING_FOLDER="$PLAIN_DIR/.tmp/python_conformance"
+# The working folder lives in the system temp directory (an absolute path), not
+# inside the project, so no build debris is left in the repo. $2 arrives as an
+# absolute path from current renderers, so only its basename is used to name the
+# folder (never concatenate the raw argument).
+WORKING_FOLDER="/tmp/python_conformance_$(basename "$ABS_TESTS_FOLDER")"
 printf "Working folder: %s\n" "$WORKING_FOLDER"
 # Remove the folder itself in one shot rather than deleting its contents with
 # `find -exec rm -rf {} +`: on macOS's BSD find, that traversal races with the
@@ -220,14 +225,14 @@ fi
 end_time=$(date +%s)
 printf "Requirements setup completed in %s seconds\n" "$((end_time - start_time))"
 
-# ----- [8/8] Run conformance tests LIVE from .tmp, impl from ROOT -----------
+# ----- [8/8] Run conformance tests LIVE from working folder, impl from ROOT -
 banner "[8/8] Run conformance tests (live provider)"
 cd "$WORKING_FOLDER" 2>/dev/null || {
     printf "Error: could not enter working folder %s\n" "$WORKING_FOLDER" >&2
     exit $UNRECOVERABLE_ERROR_EXIT_CODE
 }
 # PYTHONPATH=ROOT => `from src.integrations.<name> import ...` resolves to the
-# implementation code in the host root, not anything under .tmp.
+# implementation code in the host root, not anything under the working folder.
 export PYTHONPATH="$HOST_CODEBASE_ROOT${PYTHONPATH:+:$PYTHONPATH}"
 TEST_CMD=("$VENV_PY" -m pytest \
           -vv \

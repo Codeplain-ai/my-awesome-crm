@@ -10,15 +10,16 @@ the embedded Java conformance flow onto Python:
   mvn install from ROOT (host + impl)     | overlay $1 (generated impl) into the
     -> artifact in ~/.m2                  |   host ROOT src/integrations/<name>/,
                                           |   install ROOT requirements.txt
-  cd .tmp/java_conformance && mvn install | stage $2 into .tmp/python_conformance,
+  cd .tmp/java_conformance && mvn install | stage $2 into a system-temp folder,
     -> resolve conformance deps           |   install the conformance suite's deps
-  mvn test (impl from ~/.m2)              | cd .tmp/python_conformance && pytest
+  mvn test (impl from ~/.m2)              | cd <system temp>/... && pytest
                                           |   with PYTHONPATH=ROOT so the ROOT impl
                                           |   code is what gets imported
 
 $1 (build folder) is overlaid into the host root per the embedded contract
 (scoped to the module's own package dir). $2 (conformance tests) is copied
-into .tmp and run from there, leaving the authored test tree pristine.
+into a working folder in the system temp directory and run from there, leaving
+the authored test tree pristine.
 
   Usage: run_conformance_tests_python.ps1 <build_folder> <conformance_tests_folder>
 
@@ -196,9 +197,13 @@ foreach ($line in (Get-Content -LiteralPath $EnvFile)) {
     }
 }
 
-# ----- [6/8] Stage conformance tests into .tmp ------------------------------
+# ----- [6/8] Stage conformance tests into a system-temp working folder ------
 Banner "[6/8] Stage conformance tests into working folder"
-$WorkingFolder = Join-Path (Join-Path $PlainDir '.tmp') 'python_conformance'
+# The working folder lives in the system temp directory (an absolute path), not
+# inside the project, so no build debris is left in the repo. $2 arrives as an
+# absolute path from current renderers, so only its leaf name is used to name
+# the folder (never concatenate the raw argument).
+$WorkingFolder = Join-Path ([System.IO.Path]::GetTempPath()) "python_conformance_$(Split-Path $AbsTestsFolder -Leaf)"
 Write-Host "Working folder: $WorkingFolder"
 # Remove the folder itself in one shot so no stale files from a previous
 # conformance run (e.g. a nested .venv) are picked up by pytest alongside the
@@ -257,7 +262,7 @@ $end_time = Get-Date
 $elapsed = [int]([math]::Round(($end_time - $start_time).TotalSeconds))
 Write-Host "Requirements setup completed in $elapsed seconds"
 
-# ----- [8/8] Run conformance tests LIVE from .tmp, impl from ROOT -----------
+# ----- [8/8] Run conformance tests LIVE from working folder, impl from ROOT -
 Banner "[8/8] Run conformance tests (live provider)"
 try {
     Set-Location -LiteralPath $WorkingFolder -ErrorAction Stop
@@ -266,7 +271,7 @@ try {
     exit $UNRECOVERABLE_ERROR_EXIT_CODE
 }
 # PYTHONPATH=ROOT => `from src.integrations.<name> import ...` resolves to the
-# implementation code in the host root, not anything under .tmp.
+# implementation code in the host root, not anything under the working folder.
 if ($env:PYTHONPATH) {
     $env:PYTHONPATH = "$HostRoot" + [IO.Path]::PathSeparator + $env:PYTHONPATH
 } else {

@@ -130,9 +130,11 @@ if ($TestTargets.Count -eq 0) {
     exit 1
 }
 
-# Step 5 - dependency environment. Keep the host source tree clean by housing
-# the venv under plain/.tmp/ rather than inside the host repo.
-$VenvDir = Join-Path (Join-Path $PlainDir '.tmp') 'venv'
+# Step 5 - dependency environment. Keep the host source tree and the project
+# clean by housing the venv in the system temp directory (an absolute path)
+# rather than inside the repo. The host-root leaf name keeps the path stable
+# across runs so the venv is reused.
+$VenvDir = Join-Path (Join-Path ([System.IO.Path]::GetTempPath()) "python_unittests_$(Split-Path $HostRoot -Leaf)") 'venv'
 $VenvPy = Join-Path (Join-Path $VenvDir 'Scripts') 'python.exe'
 $CreatedVenv = $false
 if (-not (Test-Path -LiteralPath $VenvPy)) {
