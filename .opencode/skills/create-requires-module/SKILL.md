@@ -50,11 +50,12 @@ description: Extended module that builds on base_module
 ---
 
 ***definitions***
+
 - :NewFeature: is a feature added by this module.
 
 ***functional specs***
 
-- The system should support :NewFeature:.
+- :NewFeature: is available.
 ```
 
 A module can use both `requires` and `import` together. `requires` points to other root-level modules; `import` resolves from the default `template/` directory (no prefix needed).

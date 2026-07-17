@@ -45,14 +45,22 @@ When the requirements truly conflict, choose a resolution strategy:
 
 **Strategy A: Add detail to disambiguate.** Often the specs aren't contradictory — they're just ambiguous enough that the renderer picks a conflicting interpretation. Adding explicit context to one or both specs eliminates the ambiguity.
 
-```
 Before (ambiguous):
-- The system should return all :Resource: items.
-- The system should return only active :Resource: items.
+```plain
+***functional specs***
+
+- All :Resource: items are returned.
+
+- Only active :Resource: items are returned.
+```
 
 After (disambiguated):
-- The system should return all :Resource: items when no filter is specified.
-- When the "active" filter is specified, the system should return only active :Resource: items.
+```plain
+***functional specs***
+
+- All :Resource: items are returned when no filter is specified.
+
+- When the "active" filter is specified, only active :Resource: items are returned.
 ```
 
 **Strategy B: Revise the newer spec.** If the new spec introduced the conflict, rewrite it to be compatible with the established behavior from earlier specs.

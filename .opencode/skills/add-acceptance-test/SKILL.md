@@ -32,10 +32,11 @@ Acceptance tests are nested under the functional spec they verify, using a `***a
 ```plain
 ***functional specs***
 
-- The system should process :Task: items in batches of 100.
+- :Task: items are processed in batches of 100.
 
   ***acceptance tests***
   - Processing 250 :Task: items should result in 3 batches.
+
   - Each batch should contain at most 100 items.
 ```
 
@@ -44,29 +45,6 @@ Key formatting rules:
 - Each test bullet is indented under the `***acceptance tests***` header.
 - Multiple acceptance tests can be listed under a single functional spec.
 
-### Line syntax (hard rule)
-
-**Every line inside `***acceptance tests***` must be its own list item starting with `- `.** ***plain has no concept of bare continuation lines — indented prose without a leading `- ` is **invalid syntax** and the renderer will reject it.
-
-- Hard limit: 120 characters per line. If a sentence is too long, **split it at a natural clause boundary into nested `- ` bullets** — never wrap onto an unprefixed line.
-- Nested clarifications are also `- ` items, indented under the parent. The indentation alone is not enough; the leading `- ` is required.
-
-BAD — bare continuation lines (invalid ***plain syntax, will not render):
-
-```plain
-  ***acceptance tests***
-  - Processing 250 :Task: items should result in 3 batches with the
-    last batch containing the remaining 50 items.
-```
-
-GOOD — every line starts with `- `:
-
-```plain
-  ***acceptance tests***
-  - Processing 250 :Task: items should result in 3 batches.
-    - The first two batches each contain 100 items.
-    - The last batch contains the remaining 50 items.
-```
 
 ## Rules
 
@@ -76,7 +54,7 @@ An acceptance test is essentially an **example that illustrates** the functional
 
 ```
 Functional spec:
-- The system should return :Resource: items sorted by creation date in descending order.
+- :Resource: items are returned sorted by creation date in descending order.
 
 Good (consistent):
 - The first :Resource: in the response should have the most recent creation date.

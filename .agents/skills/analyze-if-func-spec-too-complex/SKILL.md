@@ -31,20 +31,40 @@ A drafted functional spec (not yet inserted into the file), plus the full contex
 
 Work through each indicator. A single "yes" does not automatically mean the spec is too complex, but multiple "yes" answers are a strong signal.
 
+### 0. First-Spec Bootstrap Cost
+
+Is this the first functional spec in a new root module with no implementation baseline supplied by
+`requires`? If so, include the implicit cost of creating the project structure, package metadata,
+framework configuration, entry point, initial source files, and unit-test infrastructure.
+
+The first spec must be substantially simpler than a later spec. It should expose one minimal,
+deterministic capability that can be invoked and tested. Setup without an observable result is not
+acceptable, but combining bootstrap work with persistence, integrations, multiple interfaces,
+branching workflows, or cross-cutting behavior is a strong `TOO COMPLEX` signal.
+
 ### 1. Number of Distinct Behaviors
 
 Does the spec describe more than one independently testable behavior?
 
-```
 Too complex:
-- :User: should be able to create, edit, delete, and archive :Task: items,
-  with validation on all fields and confirmation dialogs for destructive actions.
+```plain
+***functional specs***
+
+- A :User: can create, edit, delete, and archive :Task: items, with validation on all fields and confirmation dialogs for destructive actions.
+```
 
 Acceptable (one behavior each):
-- :User: should be able to create :Task:. Only valid :Task: items can be added.
-- :User: should be able to edit :Task:.
-- :User: should be able to delete :Task:.
-- :User: should be able to archive :Task:.
+```plain
+***functional specs***
+
+- A :User: can create :Task:. Only valid :Task: items can be added.
+
+- A :User: can edit :Task:.
+
+- A :User: can delete :Task:.
+
+- A :User: can archive :Task:.
+
 ```
 
 ### 2. Number of Concepts Introduced or Modified
@@ -59,18 +79,23 @@ Does the spec require introducing new data structures, UI components, API endpoi
 
 Does the spec describe multiple conditional paths, modes, or special cases?
 
-```
+
 Too complex:
-- The system should process :Order: differently based on :OrderType:.
-  Standard orders are validated and stored. Express orders skip validation
-  and are queued for immediate dispatch. Bulk orders are split into
-  sub-orders of 100 items each, validated individually, and processed
-  in parallel with progress tracking.
+```plain
+***functional specs***
+
+- :Order: processing depends on :OrderType:. Standard orders are validated and stored. Express orders skip validation and are queued for immediate dispatch. Bulk orders are split into sub-orders of 100 items each, validated individually, and processed in parallel with progress tracking.
+```
 
 Acceptable (separate the modes):
-- The system should process standard :Order: by validating and storing it.
-- The system should process express :Order: by queuing it for immediate dispatch without validation.
-- The system should process bulk :Order: by splitting it into sub-orders of 100 items each.
+```plain
+***functional specs***
+
+- A standard :Order: is validated and stored.
+
+- An express :Order: is queued for immediate dispatch without validation.
+
+- A bulk :Order: is split into sub-orders of 100 items each.
   - Each sub-order is processed individually.
 ```
 
@@ -78,32 +103,43 @@ Acceptable (separate the modes):
 
 Does the spec bundle core functionality with cross-cutting concerns like error handling, logging, retry logic, pagination, or caching?
 
-```
 Too complex:
-- The system should fetch :Resource: items from the external API with
-  pagination support, retry on transient errors with exponential backoff,
-  cache results for 5 minutes, and log all API calls.
+```plain
+***functional specs***
+
+- :Resource: items are fetched from the external API with pagination support, retry on transient errors with exponential backoff, caching for 5 minutes, and logging of all API calls.
+```
 
 Acceptable (separate concerns):
-- The system should fetch :Resource: items from the external API.
-- The system should paginate when fetching :Resource: items from the external API.
-- The system should retry fetching :Resource: on transient errors using exponential backoff.
+```plain
+***functional specs***
+- :Resource: items are fetched from the external API.
+
+- :Resource: items are fetched from the external API in pages.
+
+- Fetching :Resource: items is retried on transient errors using exponential backoff.
 ```
 
 ### 5. UI Complexity
 
 Does the spec describe a complete screen or page with multiple interactive elements, layouts, and state transitions?
 
-```
 Too complex:
-- Display a dashboard showing :User: profile, recent :Task: items in a
-  sortable table, a notification bell with unread count, and a sidebar
-  with navigation links that highlights the active page.
+```plain
+***functional specs***
+
+- The dashboard shows :User: profile, recent :Task: items in a sortable table, a notification bell with unread count, and a sidebar with navigation links that highlights the active page.
+```
 
 Acceptable (build incrementally):
-- Display a dashboard page for :User:.
-- Show recent :Task: items in a sortable table on the dashboard.
-- Show a notification indicator with the unread count on the dashboard.
+```plain
+***functional specs***
+
+- A dashboard page is shown for :User:.
+
+- Recent :Task: items are shown in a sortable table on the dashboard.
+
+- A notification indicator with the unread count is shown on the dashboard.
 ```
 
 ### 6. Data Transformation Complexity
@@ -113,14 +149,40 @@ Does the spec involve complex data mapping, aggregation, or transformation acros
 - Simple field mapping or filtering → likely fine
 - Multi-step transformations, joins across entities, or aggregations → likely too complex
 
-### 7. Rough LOC Estimation
+### 7. Implied Technical Component
+
+Does the spec imply building a substantial technical component — an engine, parser, scheduler, layout algorithm, state machine, or sync mechanism — **in addition to** the behavior it describes? A component is not a free primitive: code must be generated for it too, so it counts toward the 200-LOC budget and must be evaluated as part of the estimate. A spec that needs a component **and** wires up behavior on top of it is really two bodies of code in one spec — a strong "too complex" signal. Count the component's implementation, not just the glue that calls it.
+
+Too complex (builds the component and uses it in one spec):
+```plain
+***functional specs***
+
+- A :Report: is exported to PDF, laying out multi-page tables with repeating headers and page numbers, and charts rendered from :Report: data.
+```
+
+Acceptable (component in its own spec, then referenced):
+```plain
+***functional specs***
+
+- :PdfRenderer: lays out multi-page tables from structured content.
+  - Table headers repeat at the top of each page.
+  - Each page shows its page number.
+
+- A :Report: is exported to PDF using :PdfRenderer:, embedding charts rendered from :Report: data.
+```
+
+When this indicator fires, the fix is `break-down-func-spec` Strategy 6 — extract the component into its own earlier spec and reference it.
+
+### 8. Rough LOC Estimation
 
 Mentally estimate the implementation. Consider:
 - New files that need to be created
 - New functions/methods
+- Code for any implied technical component (engine, parser, algorithm), not just the glue that uses it
 - Data model changes (schema, migrations, types)
 - UI components (if applicable)
 - Test setup and assertions (unit tests are auto-generated alongside)
+- For the first spec in a new root module, all project and test scaffold implied by implementation requirements
 - Error handling paths
 - Import statements and boilerplate
 

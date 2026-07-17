@@ -6,11 +6,52 @@ description: Rules for writing ***functional specs*** and ***acceptance tests***
 
 When writing or editing a `***functional specs***` section in a `.plain` file, always follow these rules:
 
+## Voice
+- Write each functional spec as a **statement of fact** — present tense, indicative mood — describing what the software *is* or *does* once built, not as a command telling a developer what to build
+- **Name a concrete subject**: an actor (`A :User: can …`), a named component or concept (`:PdfRenderer: lays out …`, `:Order: processing depends on …`), or the affected data in passive voice (`All :Resource: items are returned`)
+- **Avoid the vague subject "The system …"** — it says nothing about *which* part does the work. Prefer the concrete component/concept, or passive voice with the affected concept as the subject
+- **Never open a spec with an imperative** like "Implement …", "Add …", "Create …", "Show …", "Display …", "Build …" — those read as instructions, not specifications
+- Do **not** use "should" / "should be able to" in a functional spec — that is requirement-modal voice; state the fact directly
+
+BAD — imperative commands, or the vague "The system":
+
+```plain
+***functional specs***
+
+- Implement the entry point for :App:.
+
+- The system shows :TaskList:.
+
+- Add :Task:.
+```
+
+GOOD — statements of fact with concrete subjects:
+
+```plain
+***functional specs***
+
+- :App: has an entry point.
+
+- The :TaskList: is displayed.
+
+- A :User: can add a :Task:. Only valid :Task: items are added.
+```
+
 ## Complexity limit
 - Each functional spec must imply a **maximum of 200 changed lines of code**
 - If a spec is too large, use `break-down-func-spec` to split it into multiple smaller, independent specs
 - Use `analyze-if-func-spec-too-complex` to verify before inserting
 - Use `analyze-func-specs` to check a spec (or a batch of specs) against all relevant existing specs in a single batched call; use `resolve-spec-conflict` for each conflicting pair it reports
+
+## First-spec bootstrap cost
+- The first functional spec in a new root module carries implicit implementation cost even when its text describes little behavior
+- The renderer may need to create the project structure, package metadata, framework configuration, entry point, initial source files, and unit-test infrastructure before implementing the behavior
+- Count that bootstrap work toward the 200-changed-line limit; it is not free setup outside the spec
+- Make the first spec the module's simplest useful, independently observable capability
+- The first spec must still imply a testable outcome; setup alone is not a functional spec
+- Prefer one minimal entry point or public operation with a deterministic result that can be invoked and verified
+- Defer persistence, integrations, multiple interfaces, branching workflows, and cross-cutting behavior until later specs can build on the generated baseline
+- This extra bootstrap cost applies when no previous implementation baseline exists; a module that continues from a `requires` module may already inherit the necessary scaffold
 
 ## Chronological ordering
 - Specs are rendered incrementally, top to bottom
@@ -36,6 +77,14 @@ When writing or editing a `***functional specs***` section in a `.plain` file, a
 - Nested lines clarify the parent spec — they do not introduce separate functionality
 - Even with nested detail, the spec must still imply ≤ 200 lines of code
 
+## Testability
+- Every functional spec must describe behavior that can be verified through an observable interface
+- State the triggering input or action and the deterministic outcome a test can observe
+- Include relevant outputs, state changes, errors, or externally visible side effects
+- Do not rely on generated implementation details as the only way to verify the behavior
+- If a black-box conformance test cannot be derived from the spec, make the behavior more explicit
+- Testability does not require an acceptance test; acceptance tests are reserved for full workflows
+
 ## Deterministic interface
 - Specs must be detailed enough that a developer can use the built software without reading the generated code
 - All external interfaces must be explicit: REST endpoint paths and HTTP methods, CLI command names and arguments, file formats, message schemas, etc.
@@ -45,10 +94,6 @@ When writing or editing a `***functional specs***` section in a `.plain` file, a
 - Functionality must be self-contained in the spec text
 - `requires` modules only receive functional specs — do not rely on implementation reqs to convey behavior
 - Behavior that downstream modules need must be expressed in functional specs, not elsewhere
-
-## Line length
-- See [`line-length.md`](line-length.md) — applies to every section, but bites hardest here because functional specs trend long
-- Hard limit: 120 characters. When a line gets too long, split at a natural clause boundary into nested `- ` bullets — **never** use bare indented continuation lines (invalid ***plain syntax)
 
 ## Acceptance tests
 - Nest `***acceptance tests***` under a functional spec when verification criteria are needed
@@ -63,11 +108,11 @@ When writing or editing a `***functional specs***` section in a `.plain` file, a
 ```plain
 ***functional specs***
 
-- Implement the entry point for :App:.
+- :App: has an entry point.
 
-- :User: should be able to add :Task:. Only valid :Task: items can be added.
+- A :User: can add a :Task:. Only valid :Task: items are added.
 
-- :User: should be able to send a :Message: to a :Conversation:.
+- A :User: can send a :Message: to a :Conversation:.
   - A :Message: must have non-empty content.
   - The :Message: is appended to the end of the :Conversation:.
   - All :Participant: members of the :Conversation: can see the new :Message:.
