@@ -27,6 +27,10 @@ description: Shared concepts and tech-stack implementation reqs for the CRM host
   - company_name - free-form company name (conventional)
   - custom_fields - free-form JSON object for fields that do not fit the shape above (conventional, defaults to empty object)
 
+- :Mapping: is a pure transformation from one provider record into a conventional data shape.
+  - A concrete :Mapping: definition identifies its associated integration and linked contract; its functional spec identifies the provider record schema and output data shape.
+  - A :Mapping: performs no provider I/O and does not invoke an integration entry point.
+
 - :Integration: is a runtime-discovered plug-in that pulls records out of a particular :Provider:.
   - One :Integration: corresponds to one :Provider: identifier, which is recorded as the `source` of every :Record: it produces.
   - The host logic that discovers integrations and invokes them in the ingest workflow is [ingest.py](../src/services/ingest.py) - imported from the host codebase; do not redefine or modify it.

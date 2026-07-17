@@ -1,9 +1,9 @@
 {
-    "source_hash": "5f9ba42f36c1e18324e5c1c894e8841a8db28b982134236266a5fd8c7c59fdb0",
-    "non_functional_source_hash": "45d1d2c104eaeef7881435e57c741741a6f16a9758dabcbebe474700bbd27972",
+    "source_hash": "be4ce39e4ad444649ec2b33e698186c01bd3776c939806a52684afa65348dc9a",
+    "non_functional_source_hash": "577294d87f1e23540f46f83bd49cb1d52cae67394aa2aea0ff3f124394fc5514",
     "functionalities": [
-        "- Implement a function that implements :SalesforceContactMapping: as a pure function within the integration package.",
-        "- Implement :SalesforceIntegration:'s `fetch(get_stored)` entry point.\n  - The entry point accepts the host's `get_stored` callback; this integration does not need to read already-stored records, so it may ignore the callback.\n  - Read :SalesforceCredentials: from environment variables. If any required variable is missing or empty, raise `RuntimeError` with a message naming the missing environment variable key (e.g. `SALESFORCE_ENDPOINT`).\n  - Acquire a bearer token and the instance base URL via the OAuth client-credentials flow of :SalesforceRestAPI:.\n  - Request the first page of contacts from the query endpoint of :SalesforceRestAPI: with its pinned SOQL and headers.\n  - Read every subsequent page per the pagination envelope of :SalesforceRestAPI: until all pages are read.\n  - For each record across all pages, map it with :SalesforceContactMapping: to a :Contact: data dict.\n  - Return the list of mapped :Contact: data dicts; the host stores them verbatim.",
-        "- Wire :SalesforceIntegration: into the host's runtime discovery surface.\n  - `src/integrations/salesforce/__init__.py` exposes the module-level `DATA_TYPE` set to `contact` and the top-level callable `fetch` as the package's public entry point.\n    - The package's public API is declared as exactly `DATA_TYPE` and `fetch`, for example through `__all__`.\n    - Internal helper modules (such as a mapping module) are implementation details; `__init__.py` may import them, and they need not be removed from the package namespace."
+        "- :SalesforceContactMapping: maps one `ContactRecord` of :SalesforceRestAPI: to a :Contact:.",
+        "- :SalesforceIntegration: exposes a `fetch(get_stored)` entry point.\n  - It reads the following required environment variables:\n    - `SALESFORCE_ENDPOINT` - the Salesforce organization My Domain login URL, such as `https://your-domain.my.salesforce.com`\n    - `SALESFORCE_CLIENT_ID`\n    - `SALESFORCE_CLIENT_SECRET`\n  - It raises `RuntimeError` naming any environment variable key that is missing or empty.\n  - It follows :SalesforceRestAPI: to authenticate, read every page of contacts, map every record with :SalesforceContactMapping:, and return the mapped :Contact: data dicts.",
+        "- :SalesforceIntegration: exports `fetch_contacts()` from `__init__.py`."
     ]
 }

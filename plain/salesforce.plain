@@ -2,44 +2,27 @@
 import:
   - crm_common
   - integration_testing
-description: "Salesforce Integration plug-in for the CRM backend. Adds src/integrations/salesforce/ so that GET /ingest/salesforce pulls Contact records from a Salesforce org via the REST API and stores them as contact records in the host's generic record store."
+description: "Salesforce Integration plug-in for the CRM backend."
 ---
 
 ***definitions***
 
-- :SalesforceProvider: is the :Provider: identifier `salesforce` - the folder name `src/integrations/salesforce/`, the `source` recorded on every :Record: this integration produces, and the `provider_id` value the mapping stamps on each :Contact:.
-
-- :SalesforceIntegration: is the concrete :Integration: for :SalesforceProvider: that pulls Salesforce `Contact` records and produces :Contact: data dicts under the data_type `contact`.
-
-- :SalesforceCredentials: are the :IntegrationCredentials: for :SalesforceProvider:, used to authenticate against a Salesforce org via the OAuth 2.0 client-credentials (server-to-server) flow, read from environment variables.
-  - `SALESFORCE_ENDPOINT` - the org My Domain login host, e.g. `https://your-domain.my.salesforce.com` (required)
-  - `SALESFORCE_CLIENT_ID` - the connected app consumer key (required)
-  - `SALESFORCE_CLIENT_SECRET` - the connected app consumer secret (required)
+- :SalesforceIntegration: is an :Integration: for the Salesforce :Provider: with identifier `salesforce`.
 
 - :SalesforceRestAPI: is the exact Salesforce REST API surface this integration calls, defined by [resources/salesforce/openapi.yaml](resources/salesforce/openapi.yaml).
 
-- :SalesforceContactMapping: is the field-by-field contract for converting one raw Salesforce `Contact` record into a :Contact: data dict, fully described in [resources/salesforce/contact-mapping.md](resources/salesforce/contact-mapping.md).
-
-***test reqs***
-
-- :ConformanceTests: of :SalesforceContactMapping: must generate dummy Salesforce `Contact` records based on the `ContactRecord` schema of :SalesforceRestAPI: and map each one with :SalesforceContactMapping:.
-  - Every generated record must conform to the `ContactRecord` schema of :SalesforceRestAPI:.
-  - Each mapped result must follow the :SalesforceContactMapping: contract and the :Contact: data shape.
-  - This is a pure-function check: it invokes :SalesforceContactMapping: directly on the dummy records and must not call the live API or `fetch(get_stored)`.
+- :SalesforceContactMapping: is a :Mapping: for :SalesforceIntegration:, fully described in [resources/salesforce/contact-mapping.md](resources/salesforce/contact-mapping.md).
 
 ***functional specs***
 
-- Implement a function that implements :SalesforceContactMapping: as a pure function within the integration package.
+- :SalesforceContactMapping: maps one `ContactRecord` of :SalesforceRestAPI: to a :Contact:.
 
-- Implement :SalesforceIntegration:'s `fetch(get_stored)` entry point.
-  - Read :SalesforceCredentials: from environment variables. If any required variable is missing or empty, raise `RuntimeError` with a message naming the missing environment variable key (e.g. `SALESFORCE_ENDPOINT`).
-  - Acquire a bearer token and the instance base URL via the OAuth client-credentials flow of :SalesforceRestAPI:.
-  - Request the first page of contacts from the query endpoint of :SalesforceRestAPI: with its pinned SOQL and headers.
-  - Read every subsequent page per the pagination envelope of :SalesforceRestAPI: until all pages are read.
-  - For each record across all pages, map it with :SalesforceContactMapping: to a :Contact: data dict.
-  - Return the list of mapped :Contact: data dicts; the host stores them verbatim.
+- :SalesforceIntegration: exposes a `fetch(get_stored)` entry point.
+  - It reads the following required environment variables:
+    - `SALESFORCE_ENDPOINT` - the Salesforce organization My Domain login URL, such as `https://your-domain.my.salesforce.com`
+    - `SALESFORCE_CLIENT_ID`
+    - `SALESFORCE_CLIENT_SECRET`
+  - It raises `RuntimeError` naming any environment variable key that is missing or empty.
+  - It follows :SalesforceRestAPI: to authenticate, read every page of contacts, map every record with :SalesforceContactMapping:, and return the mapped :Contact: data dicts.
 
-- Wire :SalesforceIntegration: into the host's runtime discovery surface.
-  - `src/integrations/salesforce/__init__.py` exposes the module-level `DATA_TYPE` set to `contact` and the top-level callable `fetch` as the package's public entry point.
-    - The package's public API is declared as exactly `DATA_TYPE` and `fetch`, for example through `__all__`.
-    - Internal helper modules (such as a mapping module) are implementation details; `__init__.py` may import them, and they need not be removed from the package namespace.
+- :SalesforceIntegration: exports `fetch_contacts()` from `__init__.py`.

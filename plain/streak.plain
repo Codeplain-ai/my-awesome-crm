@@ -2,43 +2,25 @@
 import:
   - crm_common
   - integration_testing
-description: "Streak Integration plug-in for the CRM backend. Adds src/integrations/streak/ so that GET /ingest/streak pulls Contact records from a Streak account via the v2 REST API and stores them as contact records in the host's generic record store."
+description: "Streak Integration plug-in for the CRM backend."
 ---
 
 ***definitions***
 
-- :StreakProvider: is the :Provider: identifier `streak` - the folder name `src/integrations/streak/`, the `source` recorded on every :Record: this integration produces, and the `provider_id` value the mapping stamps on each :Contact:.
-
-- :StreakIntegration: is the concrete :Integration: for :StreakProvider: that pulls Streak `Contact` records and produces :Contact: data dicts under the data_type `contact`.
-
-- :StreakCredentials: are the :IntegrationCredentials: for :StreakProvider:, a Streak API key sent via HTTP Basic authentication (the key is the username, the password is empty), read from an environment variable.
-  - `STREAK_API_KEY` - the Streak API key (required)
+- :StreakIntegration: is an :Integration: for the Streak :Provider: with identifier `streak`.
 
 - :StreakRestAPI: is the exact Streak v2 REST API surface this integration calls, defined by [resources/streak/openapi.yaml](resources/streak/openapi.yaml).
 
-- :StreakContactMapping: is the field-by-field contract for converting one raw Streak `Contact` record into a :Contact: data dict, fully described in [resources/streak/contact-mapping.md](resources/streak/contact-mapping.md).
-
-***test reqs***
-
-- :ConformanceTests: of :StreakContactMapping: must generate dummy Streak `Contact` records based on the `ContactRecord` schema of :StreakRestAPI: and map each one with :StreakContactMapping:.
-  - Every generated record must conform to the `ContactRecord` schema of :StreakRestAPI:.
-  - Each mapped result must follow the :StreakContactMapping: contract and the :Contact: data shape.
-  - This is a pure-function check: it invokes :StreakContactMapping: directly on the dummy records and must not call the live API or `fetch(get_stored)`.
+- :StreakContactMapping: is a :Mapping: for :StreakIntegration:, fully described in [resources/streak/contact-mapping.md](resources/streak/contact-mapping.md).
 
 ***functional specs***
 
-- Implement a function that implements :StreakContactMapping: as a pure function within the integration package.
+- :StreakContactMapping: maps one `ContactRecord` of :StreakRestAPI: to a :Contact:.
 
-- Implement :StreakIntegration:'s `fetch(get_stored)` entry point.
-  - Read :StreakCredentials: from environment variables. If any required variable is missing or empty, raise `RuntimeError` with a message naming the missing environment variable key (e.g. `STREAK_API_KEY`).
-  - Authenticate every request by sending the API key via HTTP Basic per :StreakRestAPI: (the key is the username, the password is empty).
-  - List every team the key can access from the teams endpoint of :StreakRestAPI:.
-  - For each team, request that team's full contact list from the team contacts endpoint of :StreakRestAPI:.
-    - The team contact list is a single plain array - Streak documents no intra-team pagination, so each team is read in one call and the per-team results are concatenated across all teams.
-  - For each record across all teams, map it with :StreakContactMapping: to a :Contact: data dict.
-  - Return the list of mapped :Contact: data dicts; the host stores them verbatim.
+- :StreakIntegration: exposes a `fetch(get_stored)` entry point.
+  - It reads the following required environment variable:
+    - `STREAK_API_KEY` - the Streak API key used as the HTTP Basic username with an empty password
+  - It raises `RuntimeError` naming the environment variable key when it is missing or empty.
+  - It follows :StreakRestAPI: to authenticate, read the contacts of every accessible team, map every record with :StreakContactMapping:, and return the mapped :Contact: data dicts.
 
-- Wire :StreakIntegration: into the host's runtime discovery surface.
-  - `src/integrations/streak/__init__.py` exposes the module-level `DATA_TYPE` set to `contact` and the top-level callable `fetch` as the package's public entry point.
-    - The package's public API is declared as exactly `DATA_TYPE` and `fetch`, for example through `__all__`.
-    - Internal helper modules (such as a mapping module) are implementation details; `__init__.py` may import them, and they need not be removed from the package namespace.
+- :StreakIntegration: exports `fetch_contacts()` from `__init__.py`.

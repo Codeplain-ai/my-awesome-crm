@@ -24,8 +24,9 @@ description: "Shared conformance-testing requirements for every CRM integration 
   - Such a run that never reached the provider proves nothing and must be treated as a failure.
   - These :ConformanceTests: exercise `fetch(get_stored)` end to end against the live API and assert the returned records conform to the `data` shape the integration emits for its data_type (the contact shape for contact integrations).
 
-- :ConformanceTests: of a pure-function functionality - one that maps or transforms a given input into an output with no network access - run offline against fixed dummy inputs.
-  - They invoke that functionality directly with the dummy inputs and assert its exact expected outputs.
+- :ConformanceTests: of every :Mapping: run offline against mocked provider records.
+  - They generate dummy records that conform to the provider record schema identified by the concrete :Mapping:.
+  - They invoke the :Mapping: directly and assert that every result follows its mapping contract and declared output data shape.
   - They must NOT call the live provider API and must NOT call `fetch(get_stored)`; only the live-I/O functionalities above do that.
 
 - :ConformanceTests: that exercise the host's runtime discovery and ingestion of an integration import the host entry points (`discover_integrations`, `run_integration_service`) from the host module `src.services.ingest`.

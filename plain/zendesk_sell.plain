@@ -2,42 +2,25 @@
 import:
   - crm_common
   - integration_testing
-description: "Zendesk Sell Integration plug-in for the CRM backend. Adds src/integrations/zendesk_sell/ so that GET /ingest/zendesk_sell pulls Contact records from a Zendesk Sell account via the v2 REST API and stores them as contact records in the host's generic record store."
+description: "Zendesk Sell Integration plug-in for the CRM backend."
 ---
 
 ***definitions***
 
-- :ZendeskSellProvider: is the :Provider: identifier `zendesk_sell` - the folder name `src/integrations/zendesk_sell/`, the `source` recorded on every :Record: this integration produces, and the `provider_id` value the mapping stamps on each :Contact:.
-
-- :ZendeskSellIntegration: is the concrete :Integration: for :ZendeskSellProvider: that pulls Zendesk Sell `Contact` records and produces :Contact: data dicts under the data_type `contact`.
-
-- :ZendeskSellCredentials: are the :IntegrationCredentials: for :ZendeskSellProvider:, a Zendesk Sell OAuth 2.0 access token sent as an HTTP Bearer token, read from an environment variable.
-  - `ZENDESK_SELL_ACCESS_TOKEN` - the Zendesk Sell OAuth 2.0 access token (required)
+- :ZendeskSellIntegration: is an :Integration: for the Zendesk Sell :Provider: with identifier `zendesk_sell`.
 
 - :ZendeskSellRestAPI: is the exact Zendesk Sell v2 REST API surface this integration calls, defined by [resources/zendesk_sell/openapi.yaml](resources/zendesk_sell/openapi.yaml).
 
-- :ZendeskSellContactMapping: is the field-by-field contract for converting one raw Zendesk Sell `Contact` record into a :Contact: data dict, fully described in [resources/zendesk_sell/contact-mapping.md](resources/zendesk_sell/contact-mapping.md).
-
-***test reqs***
-
-- :ConformanceTests: of :ZendeskSellContactMapping: must generate dummy Zendesk Sell `Contact` records based on the `ContactRecord` schema of :ZendeskSellRestAPI: and map each one with :ZendeskSellContactMapping:.
-  - Every generated record must conform to the `ContactRecord` schema of :ZendeskSellRestAPI:.
-  - Each mapped result must follow the :ZendeskSellContactMapping: contract and the :Contact: data shape.
-  - This is a pure-function check: it invokes :ZendeskSellContactMapping: directly on the dummy records and must not call the live API or `fetch(get_stored)`.
+- :ZendeskSellContactMapping: is a :Mapping: for :ZendeskSellIntegration:, fully described in [resources/zendesk_sell/contact-mapping.md](resources/zendesk_sell/contact-mapping.md).
 
 ***functional specs***
 
-- Implement a function that implements :ZendeskSellContactMapping: as a pure function within the integration package.
-  - The input is the `data` object of one entry of the `items` array of a :ZendeskSellRestAPI: list response.
+- :ZendeskSellContactMapping: maps the `data` object of one `ContactRecord` entry of :ZendeskSellRestAPI: to a :Contact:.
 
-- Implement :ZendeskSellIntegration:'s `fetch(get_stored)` entry point.
-  - Read :ZendeskSellCredentials: from environment variables. If any required variable is missing or empty, raise `RuntimeError` with a message naming the missing environment variable key (e.g. `ZENDESK_SELL_ACCESS_TOKEN`).
-  - Request the first page of contacts from the contacts list endpoint of :ZendeskSellRestAPI: with its pinned page size and the required headers (the Bearer authorization header, the Accept header, and a descriptive User-Agent header) of :ZendeskSellRestAPI:.
-  - Read every subsequent page per the pagination envelope of :ZendeskSellRestAPI: until all pages are read.
-  - For each entry across all pages, map its `data` object with :ZendeskSellContactMapping: to a :Contact: data dict.
-  - Return the list of mapped :Contact: data dicts; the host stores them verbatim.
+- :ZendeskSellIntegration: exposes a `fetch(get_stored)` entry point.
+  - It reads the following required environment variable:
+    - `ZENDESK_SELL_ACCESS_TOKEN`
+  - It raises `RuntimeError` naming the environment variable key when it is missing or empty.
+  - It follows :ZendeskSellRestAPI: to authenticate, read every page of contacts, map every entry with :ZendeskSellContactMapping:, and return the mapped :Contact: data dicts.
 
-- Wire :ZendeskSellIntegration: into the host's runtime discovery surface.
-  - `src/integrations/zendesk_sell/__init__.py` exposes the module-level `DATA_TYPE` set to `contact` and the top-level callable `fetch` as the package's public entry point.
-    - The package's public API is declared as exactly `DATA_TYPE` and `fetch`, for example through `__all__`.
-    - Internal helper modules (such as a mapping module) are implementation details; `__init__.py` may import them, and they need not be removed from the package namespace.
+- :ZendeskSellIntegration: exports `fetch_contacts()` from `__init__.py`.

@@ -2,41 +2,25 @@
 import:
   - crm_common
   - integration_testing
-description: "Nimble Integration plug-in for the CRM backend. Adds src/integrations/nimble/ so that GET /ingest/nimble pulls Contact records from a Nimble account via the Nimble v1 REST API and stores them as contact records in the host's generic record store."
+description: "Nimble Integration plug-in for the CRM backend."
 ---
 
 ***definitions***
 
-- :NimbleProvider: is the :Provider: identifier `nimble` - the folder name `src/integrations/nimble/`, the `source` recorded on every :Record: this integration produces, and the `provider_id` value the mapping stamps on each :Contact:.
-
-- :NimbleIntegration: is the concrete :Integration: for :NimbleProvider: that pulls Nimble person contact records and produces :Contact: data dicts under the data_type `contact`.
-
-- :NimbleCredentials: are the :IntegrationCredentials: for :NimbleProvider:, a Nimble OAuth 2.0 access token sent as an HTTP Bearer token, read from an environment variable.
-  - `NIMBLE_ACCESS_TOKEN` - the Nimble OAuth 2.0 access token (required)
+- :NimbleIntegration: is an :Integration: for the Nimble :Provider: with identifier `nimble`.
 
 - :NimbleRestAPI: is the exact Nimble REST API surface this integration calls, defined by [resources/nimble/openapi.yaml](resources/nimble/openapi.yaml).
 
-- :NimbleContactMapping: is the field-by-field contract for converting one raw Nimble contact record into a :Contact: data dict, fully described in [resources/nimble/contact-mapping.md](resources/nimble/contact-mapping.md).
-
-***test reqs***
-
-- :ConformanceTests: of :NimbleContactMapping: must generate dummy Nimble contact records based on the `ContactRecord` schema of :NimbleRestAPI: and map each one with :NimbleContactMapping:.
-  - Every generated record must conform to the `ContactRecord` schema of :NimbleRestAPI:.
-  - Each mapped result must follow the :NimbleContactMapping: contract and the :Contact: data shape.
-  - This is a pure-function check: it invokes :NimbleContactMapping: directly on the dummy records and must not call the live API or `fetch(get_stored)`.
+- :NimbleContactMapping: is a :Mapping: for :NimbleIntegration:, fully described in [resources/nimble/contact-mapping.md](resources/nimble/contact-mapping.md).
 
 ***functional specs***
 
-- Implement a function that implements :NimbleContactMapping: as a pure function within the integration package.
+- :NimbleContactMapping: maps one `ContactRecord` of :NimbleRestAPI: to a :Contact:.
 
-- Implement :NimbleIntegration:'s `fetch(get_stored)` entry point.
-  - Read :NimbleCredentials: from environment variables. If any required variable is missing or empty, raise `RuntimeError` with a message naming the missing environment variable key (e.g. `NIMBLE_ACCESS_TOKEN`).
-  - Request the first page of contacts from the contacts list endpoint of :NimbleRestAPI: with its pinned query parameters and the Bearer authorization header carrying the access token.
-  - Read every subsequent page per the pagination envelope of :NimbleRestAPI: until all pages are read.
-  - For each record across all pages, map it with :NimbleContactMapping: to a :Contact: data dict.
-  - Return the list of mapped :Contact: data dicts; the host stores them verbatim.
+- :NimbleIntegration: exposes a `fetch(get_stored)` entry point.
+  - It reads the following required environment variable:
+    - `NIMBLE_ACCESS_TOKEN`
+  - It raises `RuntimeError` naming the environment variable key when it is missing or empty.
+  - It follows :NimbleRestAPI: to authenticate, read every page of contacts, map every record with :NimbleContactMapping:, and return the mapped :Contact: data dicts.
 
-- Wire :NimbleIntegration: into the host's runtime discovery surface.
-  - `src/integrations/nimble/__init__.py` exposes the module-level `DATA_TYPE` set to `contact` and the top-level callable `fetch` as the package's public entry point.
-    - The package's public API is declared as exactly `DATA_TYPE` and `fetch`, for example through `__all__`.
-    - Internal helper modules (such as a mapping module) are implementation details; `__init__.py` may import them, and they need not be removed from the package namespace.
+- :NimbleIntegration: exports `fetch_contacts()` from `__init__.py`.

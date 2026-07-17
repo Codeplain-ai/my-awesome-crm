@@ -2,42 +2,26 @@
 import:
   - crm_common
   - integration_testing
-description: "Pipedrive Integration plug-in for the CRM backend. Adds src/integrations/pipedrive/ so that GET /ingest/pipedrive pulls Person records from a Pipedrive account via the v1 REST API and stores them as contact records in the host's generic record store."
+description: "Pipedrive Integration plug-in for the CRM backend."
 ---
 
 ***definitions***
 
-- :PipedriveProvider: is the :Provider: identifier `pipedrive` - the folder name `src/integrations/pipedrive/`, the `source` recorded on every :Record: this integration produces, and the `provider_id` value the mapping stamps on each :Contact:.
-
-- :PipedriveIntegration: is the concrete :Integration: for :PipedriveProvider: that pulls Pipedrive `Person` records and produces :Contact: data dicts under the data_type `contact`.
-
-- :PipedriveCredentials: are the :IntegrationCredentials: for :PipedriveProvider:, a Pipedrive personal API token plus the account's company subdomain, read from environment variables.
-  - `PIPEDRIVE_API_TOKEN` - the Pipedrive personal API token, sent as the `api_token` query parameter (required)
-  - `PIPEDRIVE_COMPANY_DOMAIN` - the company subdomain of the account, e.g. `acme` for `https://acme.pipedrive.com` (required)
+- :PipedriveIntegration: is an :Integration: for the Pipedrive :Provider: with identifier `pipedrive`.
 
 - :PipedriveRestAPI: is the exact Pipedrive REST API surface this integration calls, defined by [resources/pipedrive/openapi.yaml](resources/pipedrive/openapi.yaml).
 
-- :PipedriveContactMapping: is the field-by-field contract for converting one raw Pipedrive `Person` record into a :Contact: data dict, fully described in [resources/pipedrive/contact-mapping.md](resources/pipedrive/contact-mapping.md).
-
-***test reqs***
-
-- :ConformanceTests: of :PipedriveContactMapping: must generate dummy Pipedrive `Person` records based on the `ContactRecord` schema of :PipedriveRestAPI: and map each one with :PipedriveContactMapping:.
-  - Every generated record must conform to the `ContactRecord` schema of :PipedriveRestAPI:.
-  - Each mapped result must follow the :PipedriveContactMapping: contract and the :Contact: data shape.
-  - This is a pure-function check: it invokes :PipedriveContactMapping: directly on the dummy records and must not call the live API or `fetch(get_stored)`.
+- :PipedriveContactMapping: is a :Mapping: for :PipedriveIntegration:, fully described in [resources/pipedrive/contact-mapping.md](resources/pipedrive/contact-mapping.md).
 
 ***functional specs***
 
-- Implement a function that implements :PipedriveContactMapping: as a pure function within the integration package.
+- :PipedriveContactMapping: maps one `ContactRecord` of :PipedriveRestAPI: to a :Contact:.
 
-- Implement :PipedriveIntegration:'s `fetch(get_stored)` entry point.
-  - Read :PipedriveCredentials: from environment variables. If any required variable is missing or empty, raise `RuntimeError` with a message naming the missing environment variable key (e.g. `PIPEDRIVE_API_TOKEN`).
-  - Request the first page of persons from the persons list endpoint of :PipedriveRestAPI: with its pinned page size and the `api_token` query parameter, against the company host derived from `PIPEDRIVE_COMPANY_DOMAIN`.
-  - Read every subsequent page per the pagination envelope of :PipedriveRestAPI: until all pages are read.
-  - For each record across all pages, map it with :PipedriveContactMapping: to a :Contact: data dict.
-  - Return the list of mapped :Contact: data dicts; the host stores them verbatim.
+- :PipedriveIntegration: exposes a `fetch(get_stored)` entry point.
+  - It reads the following required environment variables:
+    - `PIPEDRIVE_API_TOKEN`
+    - `PIPEDRIVE_COMPANY_DOMAIN` - the account's company subdomain, such as `acme` for `https://acme.pipedrive.com`
+  - It raises `RuntimeError` naming any environment variable key that is missing or empty.
+  - It follows :PipedriveRestAPI: to authenticate, read every page of persons, map every record with :PipedriveContactMapping:, and return the mapped :Contact: data dicts.
 
-- Wire :PipedriveIntegration: into the host's runtime discovery surface.
-  - `src/integrations/pipedrive/__init__.py` exposes the module-level `DATA_TYPE` set to `contact` and the top-level callable `fetch` as the package's public entry point.
-    - The package's public API is declared as exactly `DATA_TYPE` and `fetch`, for example through `__all__`.
-    - Internal helper modules (such as a mapping module) are implementation details; `__init__.py` may import them, and they need not be removed from the package namespace.
+- :PipedriveIntegration: exports `fetch_contacts()` from `__init__.py`.

@@ -2,42 +2,25 @@
 import:
   - crm_common
   - integration_testing
-description: "Close Integration plug-in for the CRM backend. Adds src/integrations/close/ so that GET /ingest/close pulls Contact records from a Close (close.com) organization via the REST API and stores them as contact records in the host's generic record store."
+description: "Close Integration plug-in for the CRM backend."
 ---
 
 ***definitions***
 
-- :CloseProvider: is the :Provider: identifier `close` - the folder name `src/integrations/close/`, the `source` recorded on every :Record: this integration produces, and the `provider_id` value the mapping stamps on each :Contact:.
-
-- :CloseIntegration: is the concrete :Integration: for :CloseProvider: that pulls Close `Contact` records and produces :Contact: data dicts under the data_type `contact`.
-
-- :CloseCredentials: are the :IntegrationCredentials: for :CloseProvider:, a Close API key sent via HTTP Basic auth as the username with a blank password, read from an environment variable.
-  - `CLOSE_API_KEY` - the Close API key (required)
+- :CloseIntegration: is an :Integration: for the Close :Provider: with identifier `close`.
 
 - :CloseRestAPI: is the exact Close REST API surface this integration calls, defined by [resources/close/openapi.yaml](resources/close/openapi.yaml).
 
-- :CloseContactMapping: is the field-by-field contract for converting one raw Close `Contact` record into a :Contact: data dict, fully described in [resources/close/contact-mapping.md](resources/close/contact-mapping.md).
-
-***test reqs***
-
-- :ConformanceTests: of :CloseContactMapping: must generate dummy Close `Contact` records based on the `ContactRecord` schema of :CloseRestAPI: and map each one with :CloseContactMapping:.
-  - Every generated record must conform to the `ContactRecord` schema of :CloseRestAPI:.
-  - Each mapped result must follow the :CloseContactMapping: contract and the :Contact: data shape.
-  - This is a pure-function check: it invokes :CloseContactMapping: directly on the dummy records and must not call the live API or `fetch(get_stored)`.
+- :CloseContactMapping: is a :Mapping: for :CloseIntegration:, fully described in [resources/close/contact-mapping.md](resources/close/contact-mapping.md).
 
 ***functional specs***
 
-- Implement a function that implements :CloseContactMapping: as a pure function within the integration package.
+- :CloseContactMapping: maps one `ContactRecord` of :CloseRestAPI: to a :Contact:.
 
-- Implement :CloseIntegration:'s `fetch(get_stored)` entry point.
-  - Read :CloseCredentials: from environment variables. If any required variable is missing or empty, raise `RuntimeError` with a message naming the missing environment variable key (e.g. `CLOSE_API_KEY`).
-  - Send the HTTP Basic authorization header per :CloseRestAPI: on every request, with the API key as the username and a blank password.
-  - Request the first page of contacts from the contact list endpoint of :CloseRestAPI: with its pinned `_limit` page size.
-  - Read every subsequent page per the pagination envelope of :CloseRestAPI: until `has_more` is false.
-  - For each record across all pages, map it with :CloseContactMapping: to a :Contact: data dict.
-  - Return the list of mapped :Contact: data dicts; the host stores them verbatim.
+- :CloseIntegration: exposes a `fetch(get_stored)` entry point.
+  - It reads the following required environment variable:
+    - `CLOSE_API_KEY` - the Close API key used as the HTTP Basic username with an empty password
+  - It raises `RuntimeError` naming the environment variable key when it is missing or empty.
+  - It follows :CloseRestAPI: to authenticate, read every page of contacts, map every record with :CloseContactMapping:, and return the mapped :Contact: data dicts.
 
-- Wire :CloseIntegration: into the host's runtime discovery surface.
-  - `src/integrations/close/__init__.py` exposes the module-level `DATA_TYPE` set to `contact` and the top-level callable `fetch` as the package's public entry point.
-    - The package's public API is declared as exactly `DATA_TYPE` and `fetch`, for example through `__all__`.
-    - Internal helper modules (such as a mapping module) are implementation details; `__init__.py` may import them, and they need not be removed from the package namespace.
+- :CloseIntegration: exports `fetch_contacts()` from `__init__.py`.
