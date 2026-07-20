@@ -8,6 +8,11 @@
 # and tests/integrations/<name>/), then runs pytest from the host root scoped
 # to the staged integration package(s).
 #
+# Tests run inside the host project's OWN virtual environment at
+# $HOST_CODEBASE_ROOT/.venv (the one scripts/start.sh provisions), so unit
+# tests use the exact interpreter and installed dependencies the host uses.
+# The script does not create a throwaway venv.
+#
 #   Usage: run_unittests_python.sh <source_build_folder>
 #
 # The host codebase root defaults to the parent of the plain/ folder and can
@@ -15,31 +20,7 @@
 
 set -u
 
-# Step 1 - toolchain check. Any Python >= 3.12 is accepted (version-agnostic).
-# Each candidate is version-checked, not just probed for existence, so a launcher
-# aliased to an older Python (e.g. python3 -> 3.9) is skipped rather than wrongly
-# selected. Newer launchers are preferred over older ones.
-MIN_PY_MAJOR=3
-MIN_PY_MINOR=12
-py_meets_min() {
-    "$1" -c "import sys; sys.exit(0 if sys.version_info[:2] >= ($MIN_PY_MAJOR, $MIN_PY_MINOR) else 1)" 2>/dev/null
-}
-PY=""
-for cand in python3.15 python3.14 python3.13 python3.12 python3 python; do
-    if command -v "$cand" >/dev/null 2>&1 && py_meets_min "$cand"; then
-        PY="$cand"
-        break
-    fi
-done
-if [ -z "$PY" ]; then
-    echo "Error: a Python >= $MIN_PY_MAJOR.$MIN_PY_MINOR interpreter is required but none was found on PATH." >&2
-    exit 69
-fi
-
-PY_VERSION=$($PY -c 'import sys; print("%d.%d" % sys.version_info[:2])' 2>/dev/null || echo "unknown")
-echo "Using $PY ($PY_VERSION)"
-
-# Step 2 - argument validation
+# Step 1 - argument validation
 if [ $# -ne 1 ]; then
     echo "Usage: $0 <source_build_folder>" >&2
     echo "       HOST_CODEBASE_ROOT (env) overrides the host codebase root" >&2
@@ -54,7 +35,7 @@ if [ ! -d "$SOURCE_FOLDER" ]; then
     exit 2
 fi
 
-# Step 3 - resolve the host codebase root (the embedded integration's host)
+# Step 2 - resolve the host codebase root (the embedded integration's host)
 PLAIN_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 HOST_CODEBASE_ROOT="${HOST_CODEBASE_ROOT:-$(cd "$PLAIN_DIR/.." && pwd)}"
 
@@ -64,7 +45,7 @@ if [ ! -d "$HOST_CODEBASE_ROOT" ]; then
 fi
 echo "Host codebase root: $HOST_CODEBASE_ROOT"
 
-# Step 4 - overlay the generated integration package(s) into the host source tree.
+# Step 3 - overlay the generated integration package(s) into the host source tree.
 # The build only ships integration package dirs (src/integrations/<name>/ and
 # tests/integrations/<name>/), so destructive ops are scoped to those leaf dirs
 # only - never the host's top-level src/ or tests/.
@@ -102,57 +83,78 @@ if [ "${#TEST_TARGETS[@]}" -eq 0 ]; then
     exit 1
 fi
 
-# Step 5 - dependency environment. Keep the host source tree and the project
-# clean by housing the venv in the system temp directory (an absolute path)
-# rather than inside the repo. The host-root basename keeps the path stable
-# across runs so the venv is reused.
-VENV_DIR="/tmp/python_unittests_$(basename "$HOST_CODEBASE_ROOT")/venv"
-CREATED_VENV=0
-if [ ! -x "$VENV_DIR/bin/python" ]; then
-    echo "Creating venv at $VENV_DIR"
-    $PY -m venv "$VENV_DIR" || exit $?
-    CREATED_VENV=1
-fi
+# Step 4 - dependency environment. Use the host project's OWN virtual
+# environment at $HOST_CODEBASE_ROOT/.venv, which is expected to already be
+# provisioned (e.g. by scripts/start.sh). This script never installs anything -
+# it only verifies the environment and fails fast with exit 69 if it is not
+# ready. A valid venv requires both bin/python and the pyvenv.cfg marker (a
+# bare python symlink with no pyvenv.cfg is NOT a venv).
+VENV_DIR="$HOST_CODEBASE_ROOT/.venv"
 VENV_PY="$VENV_DIR/bin/python"
 
-# Some hosts create a venv without pip (a stripped Python where ensurepip is
-# missing, or an incomplete system python3-venv package). pip must be present
-# inside the venv; try to bootstrap it with ensurepip, and if it still is not
-# available, fail fast with 69 rather than dying later with an opaque error.
-if ! "$VENV_PY" -m pip --version >/dev/null 2>&1; then
-    echo "pip not found in venv; attempting to bootstrap it with ensurepip" >&2
-    "$VENV_PY" -m ensurepip --upgrade --default-pip >/dev/null 2>&1
-fi
-if ! "$VENV_PY" -m pip --version >/dev/null 2>&1; then
-    echo "Error: pip is not available in the venv at $VENV_DIR and could not be bootstrapped." >&2
-    echo "       Install the platform's Python venv/pip support (e.g. the python3-venv package) and retry." >&2
+if [ ! -x "$VENV_PY" ] || [ ! -f "$VENV_DIR/pyvenv.cfg" ]; then
+    echo "Error: host virtual environment not found or invalid at $VENV_DIR." >&2
+    echo "       Provision it first, e.g. ./scripts/start.sh (or" >&2
+    echo "       python3 -m venv .venv && .venv/bin/pip install -r requirements.txt)." >&2
     exit 69
 fi
-if [ "$CREATED_VENV" -eq 1 ]; then
-    "$VENV_PY" -m pip install --upgrade pip >/dev/null || exit $?
-fi
 
+VENV_PY_VERSION=$("$VENV_PY" -c 'import sys; print("%d.%d" % sys.version_info[:2])' 2>/dev/null || echo "unknown")
+echo "Using host venv $VENV_DIR (Python $VENV_PY_VERSION)"
+
+# Verify every host requirement AND pytest are already installed in the venv.
+# Do NOT install anything - a missing dependency is a provisioning error the
+# user must resolve (re-run scripts/start.sh), reported as exit 69. The check
+# reads requirements.txt and confirms each distribution is present via
+# importlib.metadata (network-free; matches PyPI/requirements distribution names).
 if [ -f "$HOST_CODEBASE_ROOT/requirements.txt" ]; then
-    "$VENV_PY" -m pip install -r "$HOST_CODEBASE_ROOT/requirements.txt" || exit $?
-elif [ -f "$HOST_CODEBASE_ROOT/pyproject.toml" ]; then
-    "$VENV_PY" -m pip install -e "$HOST_CODEBASE_ROOT" || exit $?
-else
-    echo "Error: no requirements.txt or pyproject.toml in $HOST_CODEBASE_ROOT" >&2
+    if ! "$VENV_PY" - "$HOST_CODEBASE_ROOT/requirements.txt" <<'PY'
+import re, sys
+import importlib.metadata as md
+missing = []
+for raw in open(sys.argv[1]):
+    line = raw.split("#", 1)[0].strip()
+    if not line or line.startswith("-"):
+        continue
+    name = re.split(r"[<>=!~;\[ ]", line, 1)[0].strip()
+    if not name:
+        continue
+    try:
+        md.version(name)
+    except md.PackageNotFoundError:
+        missing.append(name)
+if missing:
+    sys.stderr.write("Missing from venv: " + ", ".join(missing) + "\n")
+    sys.exit(1)
+PY
+    then
+        echo "Error: host venv $VENV_DIR is missing packages from requirements.txt." >&2
+        echo "       Provision it first, e.g. ./scripts/start.sh." >&2
+        exit 69
+    fi
+fi
+if ! "$VENV_PY" -m pytest --version >/dev/null 2>&1; then
+    echo "Error: pytest is not installed in host venv $VENV_DIR." >&2
+    echo "       Install the project's test dependencies into .venv and retry." >&2
     exit 69
 fi
 
-# pytest is needed to run the suite even if the host does not declare it.
-"$VENV_PY" -m pip install pytest >/dev/null || exit $?
-
-# Step 6 - run pytest from the host root so `from src.integrations.<name> ...`
+# Step 5 - run pytest from the host root so `from src.integrations.<name> ...`
 # resolves against the host layout, scoped to the staged integration package(s).
 cd "$HOST_CODEBASE_ROOT" || {
     echo "Error: could not enter host codebase root $HOST_CODEBASE_ROOT" >&2
     exit 2
 }
 
+# Activate the host venv so the tests run inside it, then invoke pytest.
+# (The activate script is not written for `set -u`, so relax nounset around it.)
+set +u
+# shellcheck disable=SC1090,SC1091
+. "$VENV_DIR/bin/activate"
+set -u
+
 echo "Running pytest in $HOST_CODEBASE_ROOT for: ${TEST_TARGETS[*]}"
-PYTHONPATH="$HOST_CODEBASE_ROOT" "$VENV_DIR/bin/pytest" \
+PYTHONPATH="$HOST_CODEBASE_ROOT" python -m pytest \
     -vv \
     -rA \
     -l \
