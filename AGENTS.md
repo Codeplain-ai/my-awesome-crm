@@ -2,9 +2,9 @@
 
 A Python 3.12 / FastAPI CRM host (`src/`) with an **embedded ***plain integration project** under
 `plain/`. Each of the 10 providers is one root `.plain` module (`salesforce.plain`, `dynamics.plain`, …) that imports `crm_common` + `integration_testing` and emits a
-runtime-discovered plug-in at `src/integrations/<name>/` exposing `DATA_TYPE` and `fetch(get_stored)`,
-which returns a list of `{data_type, data}` records that the host's generic record store persists
-verbatim.
+runtime-discovered plug-in at `src/integrations/<name>/` exposing a top-level `fetch(get_stored)`
+callable, which returns a list of `{data_type, data}` records that the host's generic record store
+persists verbatim.
 
 ## The reference and host context are auto-loaded into context
 
@@ -65,16 +65,14 @@ instead of drafting a separate one.
 When a user asks to create a new integration, the **very first action** — before any questions, host
 discovery narration, or resource authoring — is to create the empty root `.plain` module at
 `plain/<provider>.plain` containing **only** the YAML frontmatter (no spec sections yet). Mirror the
-salesforce frontmatter exactly, but the `description` must be **integration-specific** (the provider,
-its `src/integrations/<provider>/` plug-in, the `GET /ingest/<provider>` route, and what it pulls from
-the provider's API). Template:
+salesforce frontmatter exactly. Template:
 
 ```yaml
 ---
 import:
   - crm_common
   - integration_testing
-description: "<Provider> Integration plug-in for the CRM backend. Adds src/integrations/<provider>/ so that GET /ingest/<provider> pulls Contact records from <provider> via its REST API and stores them as contact records in the host's generic record store."
+description: "<Provider> Integration plug-in for the CRM backend."
 ---
 ```
 
@@ -92,13 +90,20 @@ until the interview is over. The loop is: *ask one question → user answers →
 the next question.* Each write must follow the **spec-writing style of `salesforce.plain`** (the
 structural exemplar) exactly:
 
-- Put the answer in the section it belongs to per the rules — `***definitions***` for a concept, `***test reqs***` for
-  `:ConformanceTests:` facts, `***functional specs***` for functionalities.
-- Mirror salesforce's shape: 5 definitions, 1 test req, 3 functional specs;
-  the whole API surface behind `:<Provider>RestAPI:` in `resources/<provider>/openapi.yaml` and the
+- Put the answer where it belongs. The module has only two authored sections: `***definitions***`
+  for a concept and `***functional specs***` for a functionality. Everything structural about the
+  provider's API goes in the linked resources — the OpenAPI file (`resources/<provider>/openapi.yaml`)
+  and the mapping doc (`resources/<provider>/contact-mapping.md`). The module authors **no**
+  `***test reqs***` and **no** `***implementation reqs***`.
+- Mirror salesforce's shape: **3 definitions and 3 functional specs, and nothing else.** The whole
+  API surface lives behind `:<Provider>RestAPI:` in `resources/<provider>/openapi.yaml` and the
   mapping contract behind `:<Provider>ContactMapping:` in `resources/<provider>/contact-mapping.md`
   (see *Authoring the next integration* below).
-- Inherit shared reqs silently from `crm_common` / `integration_testing` — never restate them.
+- Inherit **all** shared reqs silently from `crm_common` (implementation reqs, tech stack,
+  skip-and-log policy, layout/identifier contract, the `:UnitTests:` policy) and `integration_testing`
+  (the entire `:ConformanceTests:` policy, including the pure-function `:Mapping:` check) — never
+  restate any of them.
+
 
 ## North star: render green on the FIRST `codeplain` run
 
@@ -108,24 +113,34 @@ leaked into the render. The whole rule set is built to make that gap impossible 
 cross-checks surface surprises before authoring (`integrations.md` § *Live API must be
 cross-checked*), the mapping contract and the OpenAPI record schema are pinned so the pure-function
 conformance check can exercise the mapping against generated records, and all cross-cutting behavior
-lives in implementation reqs so it is in scope from functionality 1 (`impl-reqs.md` § *Encapsulation
-warning*).
+already lives in the inherited `crm_common` / `integration_testing` reqs so it is in scope from
+functionality 1 (`impl-reqs.md` § *Encapsulation warning*).
 
 When a mid-render stop happens anyway, do not just patch and move on — **fold the fix back into the
 specs AND into this file** so the next integration never hits it.
 
 ## Authoring the next integration — `salesforce.plain` is the structural exemplar
 
-- **5 definitions** — provider id, credentials (env-var names), `:<Provider>RestAPI:` (OpenAPI link),
-  `:<Provider>ContactMapping:` (mapping-doc link), and the integration concept itself.
-- **1 test req** — a **pure-function** conformance check of `:<Provider>ContactMapping:`: generate
-  dummy provider records from the `ContactRecord` schema of `:<Provider>RestAPI:`, map each with
-  `:<Provider>ContactMapping:`, and assert every result follows the mapping contract and the
-  `:Contact:` data shape. It invokes the mapping directly and must **not** call the live API or
-  `fetch(get_stored)`. Folder location, framework, and runner script all come from the imported
-  `integration_testing` template.
-- **3 functional specs** — the pure mapping function, the `fetch(get_stored)` composition, and
-  one-bullet wiring (`__init__.py` exposing `DATA_TYPE` + `fetch`).
+**Read `plain/salesforce.plain` before authoring — it is the source of truth for the shape, not this
+description.** The per-provider module is deliberately tiny: **3 definitions and 3 functional specs,
+and nothing else.** It authors **no `***implementation reqs***` and no `***test reqs***`** — every
+cross-cutting requirement is inherited silently from `crm_common` (tech stack, skip-and-log policy,
+layout/identifier contract, the `:UnitTests:` policy, the host ground-truth links) and
+`integration_testing` (the entire `:ConformanceTests:` policy, including the pure-function
+`:Mapping:` check and the live `fetch` check).
+
+- **3 definitions** (each one line, mirroring salesforce):
+  - `:<Provider>Integration:` — "is an `:Integration:` for the `<Provider>` `:Provider:` with identifier `<id>`." The provider identifier lives inline here; there is **no** separate provider-id concept.
+  - `:<Provider>RestAPI:` — "is the exact `<Provider>` REST API surface this integration calls, defined by [resources/<provider>/openapi.yaml](...)." The **only** link to the OpenAPI file.
+  - `:<Provider>ContactMapping:` — "is a `:Mapping:` for `:<Provider>Integration:`, fully described in [resources/<provider>/contact-mapping.md](...)." The **only** link to the mapping doc.
+  - There is **no** standalone credentials concept — the env-var names are named inline in the `fetch` functional spec, and `:IntegrationCredentials:` is inherited from `integration_testing`.
+- **0 test reqs and 0 implementation reqs in the module.** The pure-function `:Mapping:` conformance
+  check, the live `fetch` conformance check, the `:UnitTests:` policy, and the tech stack are all
+  inherited — never restate any of them.
+- **3 functional specs** (each a single top-level bullet, mirroring salesforce):
+  1. "`:<Provider>ContactMapping:` maps one `ContactRecord` of `:<Provider>RestAPI:` to a `:Contact:`." — one line, **no** sub-bullets; the field-by-field contract lives entirely in the mapping doc.
+  2. "`:<Provider>Integration:` exposes a `fetch(get_stored)` entry point." — with sub-bullets that name the required environment variables, state it "raises `RuntimeError` naming any environment variable key that is missing or empty", and say it "follows `:<Provider>RestAPI:` to authenticate, read every page of contacts, map every record with `:<Provider>ContactMapping:`, and return the mapped `:Contact:` data dicts."
+  3. "`:<Provider>Integration:` exports `fetch_contacts()` from `__init__.py`." — the host plug-in contract (the top-level `fetch(get_stored)` callable) comes from `crm_common`; this spec adds only the provider's exported entry point. There is no `DATA_TYPE` attribute — each record carries its own `data_type`.
 
 ### The whole API surface lives in `resources/<provider>/openapi.yaml`, reached through one concept
 
@@ -150,11 +165,11 @@ handling (lowercased and trimmed, `None` when missing or empty; **no** validatio
 record-skip, because the host stores the `data` verbatim), `custom_fields` rules, and the error
 contract (the mapping is **best-effort and never raises** for record content — an absent value
 becomes `None`, an underivable `full_name` becomes an empty string) — lives in the mapping doc,
-attached to a `:<Provider>ContactMapping:` concept. Functional spec 1 is then "Implement
-`:<Provider>ContactMapping:` as a pure function within the integration package" plus three deferral
-bullets: the input shape (one `ContactRecord` of `:<Provider>RestAPI:`'s query response), the
-output ("exactly those `:<Provider>ContactMapping:` pins", i.e. the `:Contact:` data shape), and the
-`provider_id` literal. **No function name, no file path.**
+attached to a `:<Provider>ContactMapping:` concept. Functional spec 1 is then a **single line** —
+"`:<Provider>ContactMapping:` maps one `ContactRecord` of `:<Provider>RestAPI:` to a `:Contact:`." —
+with **no** sub-bullets. The input shape (one `ContactRecord` of `:<Provider>RestAPI:`), the output
+(the `:Contact:` data shape), the `provider_id` literal, and every field rule all live in the
+mapping doc, not in the spec. **No function name, no file path, no deferral bullets.**
 
 ### `crm_common` owns the cross-cutting reqs — author only the per-provider residue
 
@@ -164,9 +179,11 @@ output ("exactly those `:<Provider>ContactMapping:` pins", i.e. the `:Contact:` 
   if a per-record mapping raises `ValueError` the record is skipped and logged, but the mappings are
   written best-effort and never raise, so in practice it does not trigger,
 - the **layout/identifier contract**: the only file contract is `src/integrations/<id>/__init__.py`
-  exposing `DATA_TYPE` and a top-level `fetch(get_stored)` that returns a **list** of `{data_type,
-  data}` dicts; the host stores each `data` object verbatim as a `:Record:` row (no host-side
-  validation, dedup, or merge); internal organization is explicitly optional,
+  exposing a top-level `fetch(get_stored)` callable that returns a **list** of records, each a dict
+  with a `data_type` string and a `data` object; the host stores each `data` object verbatim as a
+  `:Record:` row (no host-side validation, dedup, or merge); internal organization is explicitly
+  optional. There is **no** `DATA_TYPE` module attribute in the contract — each record carries its
+  own `data_type`,
 - the **integration `:UnitTests:` policy** (no network, single indirection seams, inline dict
   payloads, and the two mandatory coverage cases: the `fetch(get_stored)` entry point returns the
   mapped records tagged with their `data_type` + `data`, and multi-page pagination),
@@ -174,15 +191,18 @@ output ("exactly those `:<Provider>ContactMapping:` pins", i.e. the `:Contact:` 
   `:Integration:` concept — discovery + invocation logic) and `../requirements.txt` (under the pip
   req — the no-re-pin source of truth). Never re-link or paraphrase these per-module.
 
-A functional spec may still narrate per-record behavior that *is* that functionality's WHAT (the
-`fetch(get_stored)` composition names the skip-on-`ValueError` step inline) — the prohibition is on
-restating the shared *policy* as a second implementation req.
+The exemplar's `fetch` spec keeps to that functionality's WHAT — authenticate, read every page, map
+every record, return the mapped dicts — and does **not** restate the shared skip-and-log policy (that
+lives once in `crm_common`). A functional spec may narrate per-record behavior only when it *is* that
+functionality's WHAT; the prohibition is on restating a shared `crm_common` policy as a second
+requirement in the module.
 
 ### Never mandate internals — and know what the relaxation costs
 
 Do not pin internal file names (`client.py`, `mapping.py`), private function names
 (`_acquire_token`, `_get_json`), or per-file re-export wording. The contract is behavior plus the
-`__init__.py` exports (`DATA_TYPE` + `fetch`). Evidence this is real: after the mandates were removed, the re-render
+`__init__.py` exports — the top-level `fetch(get_stored)` callable (from `crm_common`) and the
+provider's exported entry point (`fetch_contacts()` in the exemplar). Evidence this is real: after the mandates were removed, the re-render
 **deleted `client.py`** and folded the client logic into `__init__.py` — correct per the contract.
 Two costs to watch:
 
@@ -231,9 +251,12 @@ conformance test is a **pure-function check**: it generates dummy provider recor
 live API or `fetch(get_stored)`. So the mapping contract and the OpenAPI record schema must be
 complete and mutually consistent before the mapping functionality renders.
 
-**Consequence:** any cross-cutting runtime behavior (credential reads, pagination, the skip-and-log
-seam) cannot live in a later functional spec. Put it in `***implementation reqs***` — in scope for
-**all** functionalities. A functional spec carries only that functionality's WHAT.
+**Consequence:** any cross-cutting runtime behavior (tech stack, the credential-read policy, the
+skip-and-log seam, the `:UnitTests:` policy) is already carried by `crm_common` / `integration_testing`
+and is in scope for **all** functionalities — the module does **not** author it, and it must never be
+tucked into a later functional spec. Provider-specific mechanics (the pagination envelope, the record
+schema, the pinned query) live in the OpenAPI resource, not in a spec or an impl req. A per-provider
+functional spec carries only that functionality's WHAT.
 
 ## Live data is dirty — the mapping absorbs it best-effort, the host stores it verbatim
 
@@ -256,11 +279,16 @@ descriptions.
 REST docs. That is not enough when the integration depends on a **client library**: the renderer will
 otherwise guess constructor kwargs and method names and get them wrong.
 
-**Rule:** for any SDK the integration depends on, fetch the library's own docs, save the snapshot
+**Rule:** for any SDK the integration depends on, fetch the library's own docs and save the snapshot
 **alongside the provider docs** under `plain/resources/docs/<provider>/` (these are saved copies; host
 source files are instead linked in place per `integration-embedded.md` § *Link host files at their
-original path*), and pin the exact API surface — constructor kwargs, method names, token calls — in
-`***implementation reqs***`.
+original path*). Note the practical reality under the current template: `crm_common` forbids adding
+any package, so an integration may depend on an SDK **only** if that SDK is already in the host
+manifest — and a standard contact integration uses the host's `httpx`, no SDK at all (salesforce
+forbids any Salesforce SDK). If an SDK genuinely is in the host manifest and its API surface must be
+pinned (constructor kwargs, method names, token calls), that pin is a **shared** requirement and
+belongs in `crm_common` (or a dedicated import module) — **not** in a per-provider module, which
+authors no `***implementation reqs***`. Raise it with the user as a host-manifest decision.
 
 ## Declare which dependencies are already available in the system — don't assume
 
@@ -273,11 +301,14 @@ requires reading it **before** the first authoring question; this lesson makes t
 the spec.
 
 **Rule:** as part of host discovery, enumerate the dependencies already available in the system from
-`requirements.txt`, and state them in the new integration's specs:
+`requirements.txt`. Under the current template the per-provider module authors **no**
+`***implementation reqs***`, so this is a *constraint you honor while authoring*, not something you
+restate in the module:
 
-- In `***implementation reqs***`, name the host packages the integration **reuses as-is** (e.g.
-  `httpx`, `requests`, `pydantic`) — these are already pinned by the host, so the integration must
-  **not** re-pin or re-add them (`integration-embedded.md` § *No host-overlapping reqs*).
+- The host packages the integration **reuses as-is** (e.g. `httpx`, `requests`, `pydantic`) are
+  already pinned by the host and constrained by `crm_common` ("every `:Integration:` must use only the
+  packages already available in the host manifest"). Do **not** re-pin or re-add them, and do **not**
+  restate this per module (`integration-embedded.md` § *No host-overlapping reqs*).
 - An integration must **not** add, pin, or install any new package, and must **not** create or modify
   `requirements.txt` — `crm_common` makes this a hard req. Any capability an integration needs is
   built on packages the host already ships (`salesforce.plain`, for instance, forbids any Salesforce
@@ -306,13 +337,16 @@ dirty-data annotations — each becomes a spec decision, not a render-time surpr
 
 This is a short reminder, not a substitute for the workflow. Follow `integrations.md`,
 `integration-embedded.md`, and `integration-embedded-testing.md` **in order before** you reach this
-point. The steps that actually prevent a mid-render stop are: pin the API surface (and any host SDK)
-in the OpenAPI file, ground the mapping's fallbacks against real boundary records, and put all
-cross-cutting behavior in implementation reqs so it is in scope from functionality 1.
+point. The steps that actually prevent a mid-render stop are: pin the API surface in the OpenAPI file,
+ground the mapping's fallbacks against real boundary records, and rely on the inherited `crm_common` /
+`integration_testing` reqs for all cross-cutting behavior so it is in scope from functionality 1 (the
+module itself authors none).
 
-- Every `***implementation reqs***` entry about `:UnitTests:` lives **only** there, and every
-  `:ConformanceTests:` fact **only** in `***test reqs***` — crossing them silently drops the
-  requirement (`impl-reqs.md` § *Unit tests vs conformance tests*, one of the most common mistakes).
+- The partition rule (for when you edit the **templates** — the per-provider module authors neither
+  section): every `***implementation reqs***` entry about `:UnitTests:` lives **only** there (in
+  `crm_common`), and every `:ConformanceTests:` fact **only** in `***test reqs***` (in
+  `integration_testing`) — crossing them silently drops the requirement (`impl-reqs.md` § *Unit tests
+  vs conformance tests*, one of the most common mistakes).
 - Run `codeplain <provider>.plain --dry-run` and `plain-healthcheck` to catch spec-syntax,
   concept-resolution, and config-wiring errors. **Be clear about their limits:** neither runs the
   mapping, hits the live API, or exercises the integration, so neither can catch a mapping bug, a
