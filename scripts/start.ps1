@@ -3,7 +3,7 @@
     One-shot getting-started + run script for My Awesome CRM (Windows / PowerShell).
 
 .DESCRIPTION
-    Idempotent: on first run it bootstraps everything (Python 3.12, virtualenv,
+    Idempotent: on first run it bootstraps everything (Python >= 3.12, virtualenv,
     dependencies) and starts the server; on subsequent runs it detects that the
     environment is already set up and just starts the server.
 
@@ -25,7 +25,9 @@ $ScriptDir    = Split-Path -Parent $MyInvocation.MyCommand.Path
 $ProjectRoot  = (Resolve-Path (Join-Path $ScriptDir '..')).Path
 $VenvDir      = Join-Path $ProjectRoot '.venv'
 $Requirements = Join-Path $ProjectRoot 'requirements.txt'
-$PythonVersion = '3.12'
+$PythonVersion   = '3.12'   # minimum supported; anything newer is accepted too
+$MinPythonMajor  = 3
+$MinPythonMinor  = 12
 
 Set-Location $ProjectRoot
 
@@ -38,19 +40,28 @@ function Write-Warn  { param($Msg) Write-Host "  ! $Msg"   -ForegroundColor Yell
 function Write-Err   { param($Msg) Write-Host "ERROR: $Msg" -ForegroundColor Red }
 
 # ---------------------------------------------------------------------------
-# 1. Ensure Python 3.12 is available.
+# 1. Ensure Python >= 3.12 is available.
 # ---------------------------------------------------------------------------
 function Find-Python312 {
-    # Prefer the Windows launcher (py -3.12), then any python on PATH that is 3.12.
+    # 3.12 is a FLOOR, not a pin: any Python >= 3.12 is accepted, matching
+    # scripts/start.sh. Newest first, so a box with 3.14 uses 3.14 rather than
+    # being told to install 3.12. Each candidate is version-checked rather than
+    # merely probed for existence, so a launcher aliased to an older Python
+    # (e.g. python3 -> 3.9) is skipped instead of wrongly selected.
+    $probe = "import sys; sys.exit(0 if sys.version_info[:2] >= ($MinPythonMajor, $MinPythonMinor) else 1)"
+
+    # Prefer the Windows launcher, newest version first.
     if (Get-Command py -ErrorAction SilentlyContinue) {
-        & py "-$PythonVersion" -c "import sys" 2>$null
-        if ($LASTEXITCODE -eq 0) {
-            return @('py', "-$PythonVersion")
+        foreach ($ver in @('3.15', '3.14', '3.13', $PythonVersion)) {
+            & py "-$ver" -c $probe 2>$null
+            if ($LASTEXITCODE -eq 0) {
+                return @('py', "-$ver")
+            }
         }
     }
-    foreach ($exe in @('python', 'python3', "python$PythonVersion")) {
+    foreach ($exe in @('python3.15', 'python3.14', 'python3.13', "python$PythonVersion", 'python3', 'python')) {
         if (Get-Command $exe -ErrorAction SilentlyContinue) {
-            $isMatch = & $exe -c "import sys; sys.exit(0 if sys.version_info[:2] == (3, 12) else 1)" 2>$null
+            & $exe -c $probe 2>$null
             if ($LASTEXITCODE -eq 0) {
                 return @($exe)
             }
@@ -79,13 +90,13 @@ function Install-Python312 {
                 [System.Environment]::GetEnvironmentVariable('Path', 'User')
 }
 
-Write-Info "Checking for Python $PythonVersion..."
+Write-Info "Checking for Python >= $PythonVersion..."
 $PythonCmd = Find-Python312
 if ($PythonCmd) {
     Write-Ok ("Found: " + (& $PythonCmd[0] $PythonCmd[1..($PythonCmd.Length-1)] --version 2>&1))
 }
 else {
-    Write-Warn "Python $PythonVersion is not installed."
+    Write-Warn "No Python >= $PythonVersion was found."
     $reply = Read-Host "Install Python $PythonVersion now? [y/N]"
     if ($reply -match '^(y|yes)$') {
         Install-Python312
@@ -94,12 +105,12 @@ else {
             Write-Ok ("Installed: " + (& $PythonCmd[0] $PythonCmd[1..($PythonCmd.Length-1)] --version 2>&1))
         }
         else {
-            Write-Err "Python $PythonVersion still not found after install. You may need to open a new terminal, or install it manually."
+            Write-Err "Python >= $PythonVersion still not found after install. You may need to open a new terminal, or install it manually."
             exit 1
         }
     }
     else {
-        Write-Err "Python $PythonVersion is required to run this project. Aborting."
+        Write-Err "Python >= $PythonVersion is required to run this project. Aborting."
         exit 1
     }
 }

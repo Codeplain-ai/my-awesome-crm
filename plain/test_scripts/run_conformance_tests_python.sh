@@ -43,27 +43,26 @@ banner() { printf '\n===== %s =====\n' "$1"; }
 
 # ----- [1/8] Toolchain check ------------------------------------------------
 banner "[1/8] Toolchain check"
-# Any Python >= 3.12 is accepted (version-agnostic). Each candidate is
-# version-checked, not just probed for existence, so a launcher aliased to an
-# older Python (e.g. python3 -> 3.9) is skipped rather than wrongly selected.
-# Newer launchers are preferred over older ones.
-MIN_PY_MAJOR=3
-MIN_PY_MINOR=12
-py_meets_min() {
-    "$1" -c "import sys; sys.exit(0 if sys.version_info[:2] >= ($MIN_PY_MAJOR, $MIN_PY_MINOR) else 1)" 2>/dev/null
-}
-PYTHON_CMD=""
-for cand in python3.15 python3.14 python3.13 python3.12 python3 python; do
-    if command -v "$cand" >/dev/null 2>&1 && py_meets_min "$cand"; then
-        PYTHON_CMD="$cand"
-        break
-    fi
-done
-if [ -z "$PYTHON_CMD" ]; then
-    printf "Error: a Python >= %s.%s interpreter is required but none was found on PATH.\n" "$MIN_PY_MAJOR" "$MIN_PY_MINOR" >&2
+# The conformance suite runs in its own isolated venv (it installs its own test
+# dependencies, which must not pollute the host environment), but that venv is
+# built from the HOST project's interpreter at $HOST_CODEBASE_ROOT/.venv - the
+# one scripts/start.sh provisioned. The project's floor is Python >= 3.12 and
+# any interpreter at or above it is fine; what is NOT fine is the tests running
+# on a DIFFERENT interpreter than the host. Selecting one off PATH here did
+# exactly that (PATH may offer a newer Python than the host venv was built
+# with), so a test dependency could break on an interpreter the host never uses.
+PLAIN_DIR="$(cd "$(dirname "$0")/.." && pwd)"
+HOST_CODEBASE_ROOT="${HOST_CODEBASE_ROOT:-$(cd "$PLAIN_DIR/.." && pwd)}"
+HOST_VENV_DIR="$HOST_CODEBASE_ROOT/.venv"
+PYTHON_CMD="$HOST_VENV_DIR/bin/python"
+
+if [ ! -x "$PYTHON_CMD" ] || [ ! -f "$HOST_VENV_DIR/pyvenv.cfg" ]; then
+    printf "Error: host virtual environment not found or invalid at %s.\n" "$HOST_VENV_DIR" >&2
+    printf "       Provision it first, e.g. ./scripts/start.sh (or\n" >&2
+    printf "       python3 -m venv .venv && .venv/bin/pip install -r requirements.txt).\n" >&2
     exit $UNRECOVERABLE_ERROR_EXIT_CODE
 fi
-printf "Python interpreter: %s (%s)\n" "$PYTHON_CMD" "$(command -v "$PYTHON_CMD")"
+printf "Python interpreter: %s (host venv)\n" "$PYTHON_CMD"
 "$PYTHON_CMD" --version
 
 # ----- [2/8] Argument validation --------------------------------------------
@@ -93,16 +92,12 @@ fi
 
 # ----- [3/8] Resolve paths --------------------------------------------------
 banner "[3/8] Resolve paths"
+# PLAIN_DIR / HOST_CODEBASE_ROOT were already resolved (and validated) in [1/8],
+# because the host venv there is derived from them.
 current_dir="$(pwd)"
-PLAIN_DIR="$(cd "$(dirname "$0")/.." && pwd)"
-HOST_CODEBASE_ROOT="${HOST_CODEBASE_ROOT:-$(cd "$PLAIN_DIR/.." && pwd)}"
 ABS_BUILD_FOLDER="$(cd "$BUILD_FOLDER" && pwd)"
 ABS_TESTS_FOLDER="$(cd "$TESTS_FOLDER" && pwd)"
 
-if [ ! -d "$HOST_CODEBASE_ROOT" ]; then
-    printf "Error: host codebase root not found: %s\n" "$HOST_CODEBASE_ROOT" >&2
-    exit $UNRECOVERABLE_ERROR_EXIT_CODE
-fi
 printf "Invocation dir (current_dir):  %s\n" "$current_dir"
 printf "Build folder (impl source):    %s\n" "$ABS_BUILD_FOLDER"
 printf "Conformance tests source:      %s\n" "$ABS_TESTS_FOLDER"

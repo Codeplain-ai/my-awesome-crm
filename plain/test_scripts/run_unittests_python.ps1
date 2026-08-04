@@ -9,64 +9,29 @@ the host codebase at the module's package path (src/integrations/<name>/
 and tests/integrations/<name>/), then runs pytest from the host root scoped
 to the staged integration package(s).
 
+Tests run inside the host project's OWN virtual environment at
+$HOST_CODEBASE_ROOT\.venv (the one scripts\start.ps1 provisions), so unit
+tests use the exact interpreter and installed dependencies the host uses.
+The script does not create a throwaway venv: the project's floor is Python
+>= 3.12 and any interpreter at or above it is fine, but the tests must run on
+the SAME one as the host. Selecting an interpreter off PATH here broke that -
+PATH may offer a newer Python than the host venv was built with.
+
   Usage: run_unittests_python.ps1 <source_build_folder>
 
 The host codebase root defaults to the parent of the plain/ folder and can
 be overridden with the HOST_CODEBASE_ROOT environment variable.
 
 This is the Windows counterpart of run_unittests_python.sh and does exactly the
-same thing: same staging model, same pytest flags, same exit codes
-(69 = no usable Python / venv-pip failure / missing host manifest,
+same thing: same staging model, same host-venv requirement, same pytest flags,
+same exit codes (69 = host venv missing/invalid or missing dependencies,
  1 = bad usage / no tests to run, 2 = missing input or host root,
  otherwise pytest's own exit code).
 #>
 
 function Write-Err($msg) { [Console]::Error.WriteLine($msg) }
 
-# Step 1 - toolchain check. Any Python >= 3.12 is accepted (version-agnostic).
-# Each candidate is version-checked, not just probed for existence, so a launcher
-# aliased to an older Python (e.g. python3 -> 3.9) is skipped rather than wrongly
-# selected. Newer launchers are preferred over older ones.
-$MinPyMajor = 3
-$MinPyMinor = 12
-
-function Test-PyMeetsMin($exe, $restArgs) {
-    try {
-        & $exe @restArgs -c "import sys; sys.exit(0 if sys.version_info[:2] >= ($MinPyMajor, $MinPyMinor) else 1)" 2>$null | Out-Null
-        return ($LASTEXITCODE -eq 0)
-    } catch {
-        return $false
-    }
-}
-
-$candidates = @(
-    @('py', '-3.15'), @('py', '-3.14'), @('py', '-3.13'), @('py', '-3.12'),
-    @('python3.15'), @('python3.14'), @('python3.13'), @('python3.12'),
-    @('python3'), @('python')
-)
-
-$PyExe = $null
-$PyArgs = @()
-foreach ($cand in $candidates) {
-    $exe = $cand[0]
-    if ($cand.Count -gt 1) { $rest = @($cand[1..($cand.Count - 1)]) } else { $rest = @() }
-    if (Test-PyMeetsMin $exe $rest) {
-        $PyExe = $exe
-        $PyArgs = $rest
-        break
-    }
-}
-if (-not $PyExe) {
-    Write-Err "Error: a Python >= $MinPyMajor.$MinPyMinor interpreter is required but none was found on PATH."
-    exit 69
-}
-
-$PyVersion = (& $PyExe @PyArgs -c 'import sys; print("%d.%d" % sys.version_info[:2])' 2>$null)
-if (-not $PyVersion) { $PyVersion = "unknown" }
-$PyDisplay = ((@($PyExe) + $PyArgs) -join ' ')
-Write-Host "Using $PyDisplay ($PyVersion)"
-
-# Step 2 - argument validation
+# Step 1 - argument validation
 if ($args.Count -ne 1) {
     Write-Err "Usage: $($MyInvocation.MyCommand.Name) <source_build_folder>"
     Write-Err "       HOST_CODEBASE_ROOT (env) overrides the host codebase root"
@@ -81,7 +46,7 @@ if (-not (Test-Path -LiteralPath $SourceFolder -PathType Container)) {
     exit 2
 }
 
-# Step 3 - resolve the host codebase root (the embedded integration's host)
+# Step 2 - resolve the host codebase root (the embedded integration's host)
 $PlainDir = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot '..')).Path
 if ($env:HOST_CODEBASE_ROOT) {
     $HostRoot = $env:HOST_CODEBASE_ROOT
@@ -95,7 +60,7 @@ if (-not (Test-Path -LiteralPath $HostRoot -PathType Container)) {
 }
 Write-Host "Host codebase root: $HostRoot"
 
-# Step 4 - overlay the generated integration package(s) into the host source tree.
+# Step 3 - overlay the generated integration package(s) into the host source tree.
 # The build only ships integration package dirs (src/integrations/<name>/ and
 # tests/integrations/<name>/), so destructive ops are scoped to those leaf dirs
 # only - never the host's top-level src/ or tests/.
@@ -130,58 +95,38 @@ if ($TestTargets.Count -eq 0) {
     exit 1
 }
 
-# Step 5 - dependency environment. Keep the host source tree and the project
-# clean by housing the venv in the system temp directory (an absolute path)
-# rather than inside the repo. The host-root leaf name keeps the path stable
-# across runs so the venv is reused.
-$VenvDir = Join-Path (Join-Path ([System.IO.Path]::GetTempPath()) "python_unittests_$(Split-Path $HostRoot -Leaf)") 'venv'
+# Step 4 - dependency environment. Use the host project's OWN virtual
+# environment at $HostRoot\.venv, which is expected to already be provisioned
+# (e.g. by scripts\start.ps1). This script never installs anything - it only
+# verifies the environment and fails fast with exit 69 if it is not ready. A
+# valid venv requires both Scripts\python.exe and the pyvenv.cfg marker.
+$VenvDir = Join-Path $HostRoot '.venv'
 $VenvPy = Join-Path (Join-Path $VenvDir 'Scripts') 'python.exe'
-$CreatedVenv = $false
-if (-not (Test-Path -LiteralPath $VenvPy)) {
-    Write-Host "Creating venv at $VenvDir"
-    & $PyExe @PyArgs -m venv $VenvDir
-    if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-    $CreatedVenv = $true
-}
 
-# Some hosts create a venv without pip (a stripped Python where ensurepip is
-# missing, or an incomplete system python-venv package). pip must be present
-# inside the venv; try to bootstrap it with ensurepip, and if it still is not
-# available, fail fast with 69 rather than dying later with an opaque error.
-& $VenvPy -m pip --version 2>$null | Out-Null
-if ($LASTEXITCODE -ne 0) {
-    Write-Err "pip not found in venv; attempting to bootstrap it with ensurepip"
-    & $VenvPy -m ensurepip --upgrade --default-pip 2>$null | Out-Null
-}
-& $VenvPy -m pip --version 2>$null | Out-Null
-if ($LASTEXITCODE -ne 0) {
-    Write-Err "Error: pip is not available in the venv at $VenvDir and could not be bootstrapped."
-    Write-Err "       Install the platform's Python venv/pip support (e.g. the python-venv package) and retry."
-    exit 69
-}
-if ($CreatedVenv) {
-    & $VenvPy -m pip install --upgrade pip | Out-Null
-    if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-}
-
-$hostReq = Join-Path $HostRoot 'requirements.txt'
-$hostPyproject = Join-Path $HostRoot 'pyproject.toml'
-if (Test-Path -LiteralPath $hostReq) {
-    & $VenvPy -m pip install -r $hostReq
-    if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-} elseif (Test-Path -LiteralPath $hostPyproject) {
-    & $VenvPy -m pip install -e $HostRoot
-    if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-} else {
-    Write-Err "Error: no requirements.txt or pyproject.toml in $HostRoot"
+if (-not (Test-Path -LiteralPath $VenvPy -PathType Leaf) -or
+    -not (Test-Path -LiteralPath (Join-Path $VenvDir 'pyvenv.cfg') -PathType Leaf)) {
+    Write-Err "Error: host virtual environment not found or invalid at $VenvDir."
+    Write-Err "       Provision it first, e.g. .\scripts\start.ps1 (or"
+    Write-Err "       py -3 -m venv .venv; .venv\Scripts\pip install -r requirements.txt)."
     exit 69
 }
 
-# pytest is needed to run the suite even if the host does not declare it.
-& $VenvPy -m pip install pytest | Out-Null
-if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+$VenvPyVersion = (& $VenvPy -c 'import sys; print("%d.%d" % sys.version_info[:2])' 2>$null)
+if (-not $VenvPyVersion) { $VenvPyVersion = "unknown" }
+Write-Host "Using host venv $VenvDir (Python $VenvPyVersion)"
 
-# Step 6 - run pytest from the host root so `from src.integrations.<name> ...`
+# Verify pytest is available in the venv. Do NOT install anything - a missing
+# dependency is a provisioning error the user must resolve (re-run
+# scripts\start.ps1), reported as exit 69. Missing host runtime packages are left
+# to surface as import errors from the tests themselves.
+& $VenvPy -m pytest --version 2>$null | Out-Null
+if ($LASTEXITCODE -ne 0) {
+    Write-Err "Error: pytest is not installed in host venv $VenvDir."
+    Write-Err "       Install the project's test dependencies into .venv and retry."
+    exit 69
+}
+
+# Step 5 - run pytest from the host root so `from src.integrations.<name> ...`
 # resolves against the host layout, scoped to the staged integration package(s).
 try {
     Set-Location -LiteralPath $HostRoot -ErrorAction Stop
@@ -192,7 +137,8 @@ try {
 
 Write-Host "Running pytest in $HostRoot for: $($TestTargets -join ' ')"
 $env:PYTHONPATH = $HostRoot
-& $VenvPy -m pytest `
+& $VenvPy `
+    -m pytest `
     -vv `
     -rA `
     -l `
