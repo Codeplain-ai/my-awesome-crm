@@ -49,47 +49,32 @@ function Banner($msg) { Write-Host ""; Write-Host "===== $msg =====" }
 
 # ----- [1/8] Toolchain check ------------------------------------------------
 Banner "[1/8] Toolchain check"
-# Any Python >= 3.12 is accepted (version-agnostic). Each candidate is
-# version-checked, not just probed for existence, so a launcher aliased to an
-# older Python (e.g. python3 -> 3.9) is skipped rather than wrongly selected.
-# Newer launchers are preferred over older ones.
-$MinPyMajor = 3
-$MinPyMinor = 12
-
-function Test-PyMeetsMin($exe, $restArgs) {
-    try {
-        & $exe @restArgs -c "import sys; sys.exit(0 if sys.version_info[:2] >= ($MinPyMajor, $MinPyMinor) else 1)" 2>$null | Out-Null
-        return ($LASTEXITCODE -eq 0)
-    } catch {
-        return $false
-    }
+# The conformance suite runs in its own isolated venv (it installs its own test
+# dependencies, which must not pollute the host environment), but that venv is
+# built from the HOST project's interpreter at $HOST_CODEBASE_ROOT\.venv - the
+# one scripts\start.ps1 provisioned. The project's floor is Python >= 3.12 and
+# any interpreter at or above it is fine; what is NOT fine is the tests running
+# on a DIFFERENT interpreter than the host. Selecting one off PATH here did
+# exactly that (PATH may offer a newer Python than the host venv was built
+# with), so a test dependency could break on an interpreter the host never uses.
+$PlainDir = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot '..')).Path
+if ($env:HOST_CODEBASE_ROOT) {
+    $HostRoot = $env:HOST_CODEBASE_ROOT
+} else {
+    $HostRoot = (Resolve-Path -LiteralPath (Join-Path $PlainDir '..')).Path
 }
+$HostVenvDir = Join-Path $HostRoot '.venv'
+$PyExe = Join-Path (Join-Path $HostVenvDir 'Scripts') 'python.exe'
 
-$candidates = @(
-    @('py', '-3.15'), @('py', '-3.14'), @('py', '-3.13'), @('py', '-3.12'),
-    @('python3.15'), @('python3.14'), @('python3.13'), @('python3.12'),
-    @('python3'), @('python')
-)
-
-$PyExe = $null
-$PyArgs = @()
-foreach ($cand in $candidates) {
-    $exe = $cand[0]
-    if ($cand.Count -gt 1) { $rest = @($cand[1..($cand.Count - 1)]) } else { $rest = @() }
-    if (Test-PyMeetsMin $exe $rest) {
-        $PyExe = $exe
-        $PyArgs = $rest
-        break
-    }
-}
-if (-not $PyExe) {
-    Write-Err "Error: a Python >= $MinPyMajor.$MinPyMinor interpreter is required but none was found on PATH."
+if (-not (Test-Path -LiteralPath $PyExe -PathType Leaf) -or
+    -not (Test-Path -LiteralPath (Join-Path $HostVenvDir 'pyvenv.cfg') -PathType Leaf)) {
+    Write-Err "Error: host virtual environment not found or invalid at $HostVenvDir."
+    Write-Err "       Provision it first, e.g. .\scripts\start.ps1 (or"
+    Write-Err "       py -3 -m venv .venv; .venv\Scripts\pip install -r requirements.txt)."
     exit $UNRECOVERABLE_ERROR_EXIT_CODE
 }
-$PyDisplay = ((@($PyExe) + $PyArgs) -join ' ')
-$PyPath = (Get-Command $PyExe -ErrorAction SilentlyContinue).Source
-Write-Host "Python interpreter: $PyDisplay ($PyPath)"
-& $PyExe @PyArgs --version
+Write-Host "Python interpreter: $PyExe (host venv)"
+& $PyExe --version
 
 # ----- [2/8] Argument validation --------------------------------------------
 Banner "[2/8] Argument validation"
@@ -118,20 +103,12 @@ if (-not (Test-Path -LiteralPath $TestsFolder -PathType Container)) {
 
 # ----- [3/8] Resolve paths --------------------------------------------------
 Banner "[3/8] Resolve paths"
+# $PlainDir / $HostRoot were already resolved (and validated) in [1/8], because
+# the host venv there is derived from them.
 $current_dir = (Get-Location).Path
-$PlainDir = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot '..')).Path
-if ($env:HOST_CODEBASE_ROOT) {
-    $HostRoot = $env:HOST_CODEBASE_ROOT
-} else {
-    $HostRoot = (Resolve-Path -LiteralPath (Join-Path $PlainDir '..')).Path
-}
 $AbsBuildFolder = (Resolve-Path -LiteralPath $BuildFolder).Path
 $AbsTestsFolder = (Resolve-Path -LiteralPath $TestsFolder).Path
 
-if (-not (Test-Path -LiteralPath $HostRoot -PathType Container)) {
-    Write-Err "Error: host codebase root not found: $HostRoot"
-    exit $UNRECOVERABLE_ERROR_EXIT_CODE
-}
 Write-Host "Invocation dir (current_dir):  $current_dir"
 Write-Host "Build folder (impl source):    $AbsBuildFolder"
 Write-Host "Conformance tests source:      $AbsTestsFolder"
@@ -216,7 +193,7 @@ Copy-Item -Path (Join-Path $AbsTestsFolder '*') -Destination $WorkingFolder -Rec
 Banner "[7/8] Install dependencies"
 $start_time = Get-Date
 $VenvDir = Join-Path $WorkingFolder '.venv'
-& $PyExe @PyArgs -m venv $VenvDir
+& $PyExe -m venv $VenvDir
 if ($LASTEXITCODE -ne 0) {
     Write-Err "Error: failed to create virtual environment at $VenvDir"
     exit $UNRECOVERABLE_ERROR_EXIT_CODE

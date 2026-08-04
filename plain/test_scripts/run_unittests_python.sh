@@ -102,37 +102,10 @@ fi
 VENV_PY_VERSION=$("$VENV_PY" -c 'import sys; print("%d.%d" % sys.version_info[:2])' 2>/dev/null || echo "unknown")
 echo "Using host venv $VENV_DIR (Python $VENV_PY_VERSION)"
 
-# Verify every host requirement AND pytest are already installed in the venv.
-# Do NOT install anything - a missing dependency is a provisioning error the
-# user must resolve (re-run scripts/start.sh), reported as exit 69. The check
-# reads requirements.txt and confirms each distribution is present via
-# importlib.metadata (network-free; matches PyPI/requirements distribution names).
-if [ -f "$HOST_CODEBASE_ROOT/requirements.txt" ]; then
-    if ! "$VENV_PY" - "$HOST_CODEBASE_ROOT/requirements.txt" <<'PY'
-import re, sys
-import importlib.metadata as md
-missing = []
-for raw in open(sys.argv[1]):
-    line = raw.split("#", 1)[0].strip()
-    if not line or line.startswith("-"):
-        continue
-    name = re.split(r"[<>=!~;\[ ]", line, 1)[0].strip()
-    if not name:
-        continue
-    try:
-        md.version(name)
-    except md.PackageNotFoundError:
-        missing.append(name)
-if missing:
-    sys.stderr.write("Missing from venv: " + ", ".join(missing) + "\n")
-    sys.exit(1)
-PY
-    then
-        echo "Error: host venv $VENV_DIR is missing packages from requirements.txt." >&2
-        echo "       Provision it first, e.g. ./scripts/start.sh." >&2
-        exit 69
-    fi
-fi
+# Verify pytest is available in the venv. Do NOT install anything - a missing
+# dependency is a provisioning error the user must resolve (re-run
+# scripts/start.sh), reported as exit 69. Missing host runtime packages are left
+# to surface as import errors from the tests themselves.
 if ! "$VENV_PY" -m pytest --version >/dev/null 2>&1; then
     echo "Error: pytest is not installed in host venv $VENV_DIR." >&2
     echo "       Install the project's test dependencies into .venv and retry." >&2
