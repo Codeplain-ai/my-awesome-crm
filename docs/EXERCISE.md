@@ -6,6 +6,7 @@
 > hand-written Python: you author the specs with the forge, then let the `codeplain` renderer
 > generate the integration code from them.
 >
+> - **Part 0** — run the host, click through the app, and see how My Awesome CRM works.
 > - **Part 1** — build a **HubSpot** integration that syncs **contacts**.
 > - **Part 2** — **maintain / extend** it to also sync **accounts** (HubSpot "companies").
 
@@ -69,21 +70,16 @@ Before you start, make sure you have:
    *live-API cross-check* against your real portal during authoring — but even if you author
    "docs-grounded" (skipping the cross-check), the token must still be in `.env` before you render.
 
-Give the host a spin first so you know what "working" looks like:
-
-```bash
-./scripts/start.sh          # macOS / Linux  (Windows: .\scripts\start.ps1)
-# then open http://localhost:8000/  and click Discover → Ingest → Records
-```
-
 ---
 
 ## 🧭 How the pieces fit (30-second mental model)
 
 - The **host** is a FastAPI app in `src/`. It has a generic record store and auto-discovers any
   plug-in under `src/integrations/<provider>/`.
-- Each integration plug-in promises just two things: a module-level `DATA_TYPE` and a
-  `fetch(get_stored)` function that returns a list of records to store.
+- Each integration plug-in promises exactly one thing: a top-level `fetch(get_stored)` callable
+  returning a list of records, each a dict with a `data_type` string and a `data` payload the host
+  stores verbatim. Because every record carries its own `data_type`, one integration can emit several
+  kinds in a single run (that's what makes Part 2 possible).
 - You **don't write that plug-in by hand.** You write a `.plain` **spec** under `plain/` (e.g.
   `plain/hubspot.plain`) plus its `resources/` (an OpenAPI file for the API surface, a mapping doc
   for the field-by-field contract). The `codeplain` renderer turns the spec into the plug-in under
@@ -93,6 +89,77 @@ Give the host a spin first so you know what "working" looks like:
 
 `plain/salesforce.plain` is the **reference example** — a complete, working integration you can read
 end to end while you do this exercise.
+
+---
+
+## 🩺 Part 0 — get the host running and see what it does
+
+**Do this before touching any specs.** It takes two minutes, proves your environment is sound, and
+teaches you what My Awesome CRM actually *does* — which is what makes the spec work in Part 1 make
+sense. Debugging a broken venv while also learning the forge is no fun.
+
+### Step 1 — start the host
+
+```bash
+./scripts/start.sh          # macOS / Linux
+```
+```powershell
+.\scripts\start.ps1         # Windows (PowerShell)
+```
+
+The script is **idempotent** — the first run bootstraps, every later run just starts the server. In
+order it: checks for Python **≥ 3.12** (offering to install it if absent), creates `.venv`, installs
+`requirements.txt` only when it has changed, then serves on `CRM_PORT` (default `8000`).
+
+> On Windows you may need to allow the script once:
+> `powershell -ExecutionPolicy Bypass -File .\scripts\start.ps1`
+
+That `.venv` is not just for the server — the test scripts that run during rendering use this **same**
+virtualenv, so provisioning it now is also what makes Part 1's render work.
+
+### Step 2 — open the app
+
+Go to **<http://localhost:8000/>**. You'll see two panels:
+
+- **Integrations** — every plug-in the host found under `src/integrations/`. You should see **10**
+  (salesforce, dynamics, pipedrive, zoho, copper, close, streak, zendesk_sell, sugarcrm, nimble).
+- **Records** — the store, empty on a fresh database.
+
+That list alone is your first real validation: nothing registers those providers anywhere. The host
+**scans the directory at runtime**, imports each package, and keeps the ones exposing a callable
+`fetch`. Seeing 10 cards means discovery works — and it's exactly how your HubSpot plug-in will show
+up in Part 1 without you editing a single host file.
+
+There's also **<http://localhost:8000/docs>** — the Swagger playground for the same API.
+
+### Step 3 — click an integration to validate the loop
+
+Click **salesforce** (the provider whose spec you'll be mirroring all workshop). One click runs the
+whole ingestion path, and you get a summary back:
+
+```txt
+✓ salesforce: fetched 21, stored 21, replaced 0
+```
+
+**If you have no credentials for that provider yet**, the click fails with a `RuntimeError` naming
+the missing environment variable (e.g. `SALESFORCE_CLIENT_ID`). That is **correct, expected
+behavior** — and it still validates your setup: the host discovered the plug-in, imported it, and
+called into it. Either outcome means you're ready. Only a blank Integrations panel or a server that
+won't boot is an actual problem.
+
+### What you just learned about My Awesome CRM
+
+- **One dumb table.** Every row is a `data_type`, the `source` that produced it, and a free-form JSON
+  `data` blob. There's no per-provider schema and no migration when you add a provider.
+- **The host never interprets a record.** It stores whatever the integration hands back
+  **verbatim** — no validation, no required fields, no cross-provider merging. That's why the
+  mapping contract you write in Part 1 is the *only* thing deciding a record's shape.
+- **Integrations are found, not registered.** Drop a conforming folder in; it appears. That's the
+  contract described in the mental model above.
+- **Syncs are idempotent**, which is why you can re-render and re-ingest freely during the exercise.
+
+✅ **Part 0 done** when the server is up, the Integrations panel lists the plug-ins, and clicking one
+either stores records or fails with a message naming the credential it wants.
 
 ---
 
@@ -131,8 +198,12 @@ There are no wrong answers here — choose what a real sync would want.
 
 Once the interview is done, the forge will have produced:
 
-- `plain/hubspot.plain` — 5 definitions, 1 conformance test req, 3 functional specs (mirroring
-  `salesforce.plain`).
+- `plain/hubspot.plain` — 3 definitions and 3 functional specs, and nothing else: **0 test reqs and
+  0 implementation reqs** (mirroring `salesforce.plain`). Every cross-cutting requirement is
+  inherited silently from the imported templates — `crm_common` (tech stack, the layout/identifier
+  contract, the skip-and-log policy, the `:UnitTests:` policy) and `integration_testing` (the whole
+  `:ConformanceTests:` policy). The module restates none of it; if you see it re-authoring those,
+  that's a bug worth pointing out to the agent.
 - `plain/resources/hubspot/openapi.yaml` — the entire HubSpot API surface it calls.
 - `plain/resources/hubspot/contact-mapping.md` — the field-by-field mapping contract.
 
