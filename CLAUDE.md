@@ -344,9 +344,7 @@ restate in the module:
   built on packages the host already ships (`salesforce.plain`, for instance, forbids any Salesforce
   SDK and uses the host's `httpx`). If a provider genuinely cannot be reached with the host's
   packages, that is a host-manifest decision to raise with the user, not something an integration
-  spec resolves on its own. **Known stale pin:** `requirements.txt` still carries `simple-salesforce`
-  from the pre-refactor salesforce spec; it is dead residue — do not build on it, and remove it when
-  convenient.
+  spec resolves on its own.
 - If an SDK is genuinely in play it must already be in the host manifest; pin its exact API surface
   per *Pin the third-party SDK API surface* above — "available in the system" answers *whether* it is
   present, not *how* its API is shaped.
