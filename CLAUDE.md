@@ -241,6 +241,36 @@ mandates that an error message "names" something, pin the identifier space and g
 - **After every render, mine `conformance_tests/<module>/.memory/conformance_test_memory/*.json`**
   and the log for `Specification ambiguity detected` blocks. Every RESOLVED entry and ambiguity
   suggestion is a render-time incident whose lesson gets folded into the specs and this file.
+- **Every test script derives its interpreter from the host venv — never from `PATH`.** Python
+  `>= 3.12` is a *floor*, not a pin (any newer interpreter is fine), but the tests must run on the
+  **same** interpreter as the host. All four `plain/test_scripts/` runners therefore resolve
+  `$HOST_CODEBASE_ROOT/.venv` (created by `scripts/start.{sh,ps1}`) and fail fast with exit `69`
+  when it is absent or invalid; the unit-test runners run *in* it, and the conformance runners build
+  their isolated suite venv *from* it (isolation is still needed — the suite installs its own test
+  deps, e.g. `respx`). **Never reintroduce a newest-on-`PATH` candidate scan** (`py -3.15`,
+  `python3.14`, …) into a test script: on a box with a newer Python than the host venv it silently
+  runs the suite on an interpreter the host never uses, which is how a `respx` install broke a
+  render on a Windows machine whose host venv was 3.12 while the test venv resolved to 3.14. That
+  scan belongs only in `scripts/start.{sh,ps1}`, which *provisions* the host venv — and both
+  platforms' copies must agree on the `>= 3.12` floor (Windows previously required *exactly* 3.12).
+- **A `.sh` script and its mirroring `.ps1` are maintained in lockstep — never fix one alone.** The
+  two are not alternatives; they are the same contract on two platforms, wired up by two configs
+  (`plain/config.yaml` → `test_scripts/*.sh`, `plain/config.pwsh.yaml` → `test_scripts/*.ps1`), so a
+  fix landed on only one side means Windows and macOS/Linux users render against *different
+  behavior* and the divergence is invisible to whoever is not on that platform. The project's three
+  pairs are `plain/test_scripts/run_unittests_python.{sh,ps1}`,
+  `plain/test_scripts/run_conformance_tests_python.{sh,ps1}`, and `scripts/start.{sh,ps1}`. When
+  touching one member: port the change to its twin in the same commit, keep the staging model, exit
+  codes, pytest flags, and pass criteria identical, mirror the comments so the *reasoning* stays in
+  both, and re-check that the header line claiming the file "does exactly the same thing" as its
+  counterpart is still true. Only genuinely platform-specific mechanics may differ — path
+  separators, `bin/python` vs `Scripts\python.exe`, `$LASTEXITCODE` vs `$?`, `.env` parsing idiom.
+  This is not hypothetical: the Windows 3.14 interpreter incident above happened precisely because a
+  prior commit fixed `run_unittests_python.sh` to use the host venv and left the `.ps1` on its old
+  newest-on-`PATH` scan. Two scoping notes: `scripts/cleanup.sh` is currently **unpaired** (no
+  `.ps1` twin — a known gap; if it gains one, it joins the list above), and the many
+  `.sh`/`.ps1` files under `.claude/skills/*/assets/` are **vendored plain-forge templates**, not
+  this project's scripts — do not maintain or edit those as pairs.
 
 ## Conformance is a pure-function mapping check — and specs still render incrementally
 
