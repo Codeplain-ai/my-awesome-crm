@@ -12,8 +12,16 @@
 
 .NOTES
     Honors the same env vars the app does (all optional):
-      CRM_PORT     (default 8000)   — port to serve on
-      CRM_DB_PATH  (default crm.db) — where the SQLite file lives
+      CRM_PORT     (default 8000)   - port to serve on
+      CRM_DB_PATH  (default crm.db) - where the SQLite file lives
+
+    ENCODING: keep this file pure ASCII - no em-dashes, no smart quotes, no
+    box-drawing characters. PowerShell 5.1 decodes a BOM-less file as the ANSI
+    codepage (Windows-1252), so a UTF-8 em-dash arrives as three bytes whose
+    last one is a double quote, which silently terminates the enclosing string
+    literal and misparses the rest of the script. ASCII decodes identically
+    under both codepages, so staying ASCII sidesteps this without depending on
+    a BOM (which start.sh cannot have anyway - it would break the shebang).
 #>
 
 $ErrorActionPreference = 'Stop'
@@ -42,18 +50,45 @@ function Write-Err   { param($Msg) Write-Host "ERROR: $Msg" -ForegroundColor Red
 # ---------------------------------------------------------------------------
 # 1. Ensure Python >= 3.12 is available.
 # ---------------------------------------------------------------------------
+# Invokes a resolved interpreter command with extra arguments. A resolved command
+# is an array that may be one element (@('python3')) or two (@('py', '-3.12')), so
+# the interpreter and its arguments cannot be split by hand: for a single-element
+# array $c, $c[1..($c.Length-1)] is the *reverse* range 1..0 and yields
+# ($null, $c[0]) - silently passing the interpreter's own name as its first
+# argument. Select-Object -Skip is range-safe and returns nothing for one element.
+function Invoke-Python {
+    param(
+        [string[]] $Cmd,
+        [Parameter(ValueFromRemainingArguments = $true)] $Rest
+    )
+    $exe  = $Cmd[0]
+    $argv = @($Cmd | Select-Object -Skip 1) + @($Rest)
+    & $exe @argv
+}
+
 function Find-Python312 {
     # 3.12 is a FLOOR, not a pin: any Python >= 3.12 is accepted, matching
     # scripts/start.sh. Newest first, so a box with 3.14 uses 3.14 rather than
     # being told to install 3.12. Each candidate is version-checked rather than
     # merely probed for existence, so a launcher aliased to an older Python
     # (e.g. python3 -> 3.9) is skipped instead of wrongly selected.
+    #
+    # Probing is expected to fail for most candidates, and a missing version makes
+    # the launcher write to stderr ("No suitable Python runtime found"). Under
+    # PowerShell 5.1 a native command that writes to stderr while its output is
+    # redirected surfaces as a RemoteException, which the script-level
+    # $ErrorActionPreference = 'Stop' would promote to a terminating error - so the
+    # very first absent candidate would abort the whole scan. Relax the preference
+    # for the duration of this function (the assignment is function-scoped) and
+    # judge each candidate solely by its exit code.
+    $ErrorActionPreference = 'Continue'
+
     $probe = "import sys; sys.exit(0 if sys.version_info[:2] >= ($MinPythonMajor, $MinPythonMinor) else 1)"
 
     # Prefer the Windows launcher, newest version first.
     if (Get-Command py -ErrorAction SilentlyContinue) {
         foreach ($ver in @('3.15', '3.14', '3.13', $PythonVersion)) {
-            & py "-$ver" -c $probe 2>$null
+            & py "-$ver" -c $probe 2>&1 | Out-Null
             if ($LASTEXITCODE -eq 0) {
                 return @('py', "-$ver")
             }
@@ -61,7 +96,7 @@ function Find-Python312 {
     }
     foreach ($exe in @('python3.15', 'python3.14', 'python3.13', "python$PythonVersion", 'python3', 'python')) {
         if (Get-Command $exe -ErrorAction SilentlyContinue) {
-            & $exe -c $probe 2>$null
+            & $exe -c $probe 2>&1 | Out-Null
             if ($LASTEXITCODE -eq 0) {
                 return @($exe)
             }
@@ -93,7 +128,7 @@ function Install-Python312 {
 Write-Info "Checking for Python >= $PythonVersion..."
 $PythonCmd = Find-Python312
 if ($PythonCmd) {
-    Write-Ok ("Found: " + (& $PythonCmd[0] $PythonCmd[1..($PythonCmd.Length-1)] --version 2>&1))
+    Write-Ok ("Found: " + (Invoke-Python $PythonCmd --version 2>&1))
 }
 else {
     Write-Warn "No Python >= $PythonVersion was found."
@@ -102,7 +137,7 @@ else {
         Install-Python312
         $PythonCmd = Find-Python312
         if ($PythonCmd) {
-            Write-Ok ("Installed: " + (& $PythonCmd[0] $PythonCmd[1..($PythonCmd.Length-1)] --version 2>&1))
+            Write-Ok ("Installed: " + (Invoke-Python $PythonCmd --version 2>&1))
         }
         else {
             Write-Err "Python >= $PythonVersion still not found after install. You may need to open a new terminal, or install it manually."
@@ -120,8 +155,8 @@ else {
 # ---------------------------------------------------------------------------
 Write-Info "Checking for virtualenv at .venv..."
 if (-not (Test-Path $VenvDir)) {
-    Write-Warn "No virtualenv found — creating one."
-    & $PythonCmd[0] $PythonCmd[1..($PythonCmd.Length-1)] -m venv $VenvDir
+    Write-Warn "No virtualenv found - creating one."
+    Invoke-Python $PythonCmd -m venv $VenvDir
     Write-Ok "Created virtualenv at $VenvDir"
 }
 else {
@@ -141,12 +176,39 @@ if (-not (Test-Path $VenvPython)) {
 #    when the dependency list actually changed.
 # ---------------------------------------------------------------------------
 $StampFile = Join-Path $VenvDir '.requirements.installed'
-$ReqHash = (Get-FileHash -Algorithm SHA256 $Requirements).Hash
+
+# SHA-256 of a file as an uppercase hex string.
+#
+# Get-FileHash is preferred, but it cannot be assumed present: it does not exist
+# before PowerShell 4, and some installs ship a trimmed
+# Microsoft.PowerShell.Utility without it (observed on a PowerShell 5.1 box,
+# where the direct call aborted the script before dependencies were installed).
+# Fall back to .NET, which is always available. This mirrors start.sh, which
+# likewise falls back between shasum and sha256sum rather than assuming either.
+function Get-Sha256Hex {
+    param([string] $Path)
+
+    if (Get-Command Get-FileHash -ErrorAction SilentlyContinue) {
+        return (Get-FileHash -Algorithm SHA256 -Path $Path).Hash
+    }
+
+    $sha = [System.Security.Cryptography.SHA256]::Create()
+    try {
+        $stream = [System.IO.File]::OpenRead($Path)
+        try {
+            return ([System.BitConverter]::ToString($sha.ComputeHash($stream))).Replace('-', '')
+        }
+        finally { $stream.Dispose() }
+    }
+    finally { $sha.Dispose() }
+}
+
+$ReqHash = Get-Sha256Hex -Path $Requirements
 
 Write-Info "Checking Python dependencies..."
 $installed = (Test-Path $StampFile) -and ((Get-Content $StampFile -ErrorAction SilentlyContinue) -eq $ReqHash)
 if (-not $installed) {
-    Write-Warn "Dependencies missing or out of date — installing."
+    Write-Warn "Dependencies missing or out of date - installing."
     & $VenvPython -m pip install --upgrade pip
     & $VenvPython -m pip install -r $Requirements
     Set-Content -Path $StampFile -Value $ReqHash
@@ -160,7 +222,7 @@ else {
 # 4. Run the server.
 #    Launch uvicorn as a child process and wait on it, tearing it down in a
 #    finally block so the server (and uvicorn's --reload child worker) is
-#    stopped when the script stops — including on Ctrl+C or window close.
+#    stopped when the script stops - including on Ctrl+C or window close.
 # ---------------------------------------------------------------------------
 $Port = if ($env:CRM_PORT) { $env:CRM_PORT } else { '8000' }
 Write-Info "Starting My Awesome CRM on http://localhost:$Port ..."
