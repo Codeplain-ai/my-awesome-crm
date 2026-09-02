@@ -1,9 +1,12 @@
 {
   "name": "plain-forge",
-  "version": "1.0.19",
+  "version": "1.0.21",
   "agent": "opencode",
   "files": [
     "rules/bullet-continuation.md",
+    "rules/concise-specs-examples.md",
+    "rules/concise-specs-integration-examples.md",
+    "rules/concise-specs.md",
     "rules/definitions.md",
     "rules/examples/integration-embedded-testing/prepare_environment_java.sh",
     "rules/examples/integration-embedded-testing/run_conformance_tests_java.sh",
@@ -17,6 +20,7 @@
     "rules/integration-standalone.md",
     "rules/integrations.md",
     "rules/linked-resources.md",
+    "rules/module-structure.md",
     "rules/required-concepts.md",
     "rules/requires-modules.md",
     "rules/test-reqs.md",
@@ -35,6 +39,8 @@
     "skills/analyze-func-specs/SKILL.md",
     "skills/analyze-if-func-spec-too-complex/SKILL.md",
     "skills/break-down-func-spec/SKILL.md",
+    "skills/check-forge-version/SKILL.md",
+    "skills/check-forge-version/scripts/check-forge-version.mjs",
     "skills/check-plain-env/SKILL.md",
     "skills/consolidate-concepts/SKILL.md",
     "skills/create-import-module/SKILL.md",
@@ -72,6 +78,7 @@
     "skills/load-plain-reference/references/rendering-and-testing.md",
     "skills/plain-healthcheck/SKILL.md",
     "skills/refactor-module/SKILL.md",
+    "skills/resolve-section-ownership/SKILL.md",
     "skills/resolve-spec-conflict/SKILL.md",
     "skills/run-codeplain/SKILL.md"
   ]

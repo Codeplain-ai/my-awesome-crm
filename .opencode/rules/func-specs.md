@@ -37,8 +37,15 @@ GOOD — statements of fact with concrete subjects:
 - A :User: can add a :Task:. Only valid :Task: items are added.
 ```
 
+## Conciseness
+- A functional spec that a human will not read is not reviewed, so every spec must be as short as its content allows — see `concise-specs.md`
+- Cut anything obvious, any rationale, and every uncheckable adjective; keep every interface detail, boundary case, and disambiguation
+- Shorten the wording, never the facts: the rules below always win over brevity
+
 ## Complexity limit
-- Each functional spec must imply a **maximum of 200 changed lines of code**
+- The complexity limit is about breaking software into small, independently understandable behavior slices that people and AI can reason about, implement, and test reliably
+- The current mechanism for enforcing the complexity limit is that each functional spec must imply a **maximum of 200 changed lines of code**.
+- Smaller slices produce focused test failures, reduce hidden coupling and regression surface, and make review and incremental rendering more predictable
 - If a spec is too large, use `break-down-func-spec` to split it into multiple smaller, independent specs
 - Use `analyze-if-func-spec-too-complex` to verify before inserting
 - Use `analyze-func-specs` to check a spec (or a batch of specs) against all relevant existing specs in a single batched call; use `resolve-spec-conflict` for each conflicting pair it reports
@@ -57,7 +64,7 @@ GOOD — statements of fact with concrete subjects:
 - Specs are rendered incrementally, top to bottom
 - The renderer has **no knowledge of future specs** — only previously rendered specs are in context
 - A new spec can reference behavior from earlier specs but cannot assume anything about specs that come after it
-- Functional specs from `requires` modules are treated as previous requirements
+- Functional specs from `requires` modules are treated as previous requirements — transitively, across the whole ancestor chain
 
 ## No conflicts
 - The new spec must not contradict any existing functional spec
@@ -92,7 +99,7 @@ GOOD — statements of fact with concrete subjects:
 
 ## Encapsulation
 - Functionality must be self-contained in the spec text
-- `requires` modules only receive functional specs — do not rely on implementation reqs to convey behavior
+- `requires` modules only pass on functional specs and `exported_concepts` — never implementation reqs, so do not rely on implementation reqs to convey behavior
 - Behavior that downstream modules need must be expressed in functional specs, not elsewhere
 
 ## Acceptance tests

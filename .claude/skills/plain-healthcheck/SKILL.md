@@ -36,7 +36,7 @@ The skill is a **detect → fix → re-run** loop. It does not stop at the first
 
 ### Step 1 — Inventory the project
 
-1. List every `.plain` file in the repo root (and any subdirectories that contain `.plain` files). Build the module graph from each file's YAML frontmatter (`requires`, `import`).
+1. List every `.plain` file in the repo root (and any subdirectories that contain `.plain` files). Build the module graph from each file's YAML frontmatter (`requires`, `import`). Verify the `requires` graph forms a tree: every module's multiple `requires` entries must lie on one root-to-tip ancestor path.
 2. Identify **top modules** — every module that is not `requires`-ed by any other module. A single-stack project has one top module; a multi-part project (e.g. backend + frontend) has one top module per part.
 3. List every `config.yaml` in the repo (root and per-part directories such as `backend/`, `frontend/`).
 4. List every script under `test_scripts/`.
@@ -90,7 +90,7 @@ Treat the dry-run as a hard gate: the healthcheck **only passes** when every top
 Iterate until it passes:
 
 1. Read the error output. If the first run was not verbose, immediately re-run with `--verbose`. Identify the offending `.plain` file, the line (if reported), and the kind of issue: missing concept, syntax error, cyclic definition, complexity violation (`Functional spec too complex!`), conflicting reqs, missing template, broken `import`/`requires`, missing config field, etc.
-2. Fix only the `.plain` files (or the relevant `config.yaml` / template) using the appropriate edit skill — `add-concept`, `add-functional-spec`, `add-functional-specs`, `add-implementation-requirement`, `resolve-spec-conflict`, `break-down-func-spec`, `consolidate-concepts`, or an inline edit. **Never** modify generated code under `plain_modules/` or `conformance_tests/`.
+2. Fix only the `.plain` files (or the relevant `config.yaml` / template) using the appropriate edit skill — `add-concept`, `add-functional-spec`, `add-functional-specs`, `add-implementation-requirement`, `resolve-spec-conflict`, `break-down-func-spec`, `consolidate-concepts`, or an inline edit. **Never** modify generated code under `plain_modules/<module>/code/` or `plain_modules/<module>/tests/`.
 3. If you are uncertain about ***plain syntax for the failing construct, re-load `load-plain-reference` before fixing.
 4. Re-run the same `codeplain <top_module>.plain --dry-run …` command with the same flags. Repeat until it exits successfully.
 
