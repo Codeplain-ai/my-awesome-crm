@@ -111,7 +111,9 @@ if (-not (Test-Path -LiteralPath $VenvPy -PathType Leaf) -or
     exit 69
 }
 
-$VenvPyVersion = (& $VenvPy -c 'import sys; print("%d.%d" % sys.version_info[:2])' 2>$null)
+# Inner quotes should be single: PowerShell 5.1 drops double quotes when passing
+# arguments to a program, so this check would silently report "unknown".
+$VenvPyVersion = (& $VenvPy -c "import sys; print('%d.%d' % sys.version_info[:2])" 2>$null)
 if (-not $VenvPyVersion) { $VenvPyVersion = "unknown" }
 Write-Host "Using host venv $VenvDir (Python $VenvPyVersion)"
 
