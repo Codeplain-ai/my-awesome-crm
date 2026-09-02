@@ -11,9 +11,12 @@
     .\scripts\start.ps1
 
 .NOTES
+    Keep this file pure ASCII. Windows PowerShell 5.1 misreads non-ASCII, so an
+    em dash or smart quote silently breaks that string and every one after it.
+
     Honors the same env vars the app does (all optional):
-      CRM_PORT     (default 8000)   — port to serve on
-      CRM_DB_PATH  (default crm.db) — where the SQLite file lives
+      CRM_PORT     (default 8000)   - port to serve on
+      CRM_DB_PATH  (default crm.db) - where the SQLite file lives
 #>
 
 $ErrorActionPreference = 'Stop'
@@ -39,6 +42,17 @@ function Write-Ok    { param($Msg) Write-Host "  + $Msg"   -ForegroundColor Gree
 function Write-Warn  { param($Msg) Write-Host "  ! $Msg"   -ForegroundColor Yellow }
 function Write-Err   { param($Msg) Write-Host "ERROR: $Msg" -ForegroundColor Red }
 
+# Lets a program call fail without stopping this script. Redirecting the
+# program's stderr makes Windows PowerShell 5.1 raise that text as an error, so
+# 'Stop' aborts even though the program succeeded. PowerShell 7 aborts here too
+# when $PSNativeCommandUseErrorActionPreference is set.
+function Invoke-Native {
+    param([scriptblock]$Command)
+    $prev = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    try { & $Command } finally { $ErrorActionPreference = $prev }
+}
+
 # ---------------------------------------------------------------------------
 # 1. Ensure Python >= 3.12 is available.
 # ---------------------------------------------------------------------------
@@ -53,7 +67,7 @@ function Find-Python312 {
     # Prefer the Windows launcher, newest version first.
     if (Get-Command py -ErrorAction SilentlyContinue) {
         foreach ($ver in @('3.15', '3.14', '3.13', $PythonVersion)) {
-            & py "-$ver" -c $probe 2>$null
+            Invoke-Native { & py "-$ver" -c $probe 2>&1 } | Out-Null
             if ($LASTEXITCODE -eq 0) {
                 return @('py', "-$ver")
             }
@@ -61,7 +75,7 @@ function Find-Python312 {
     }
     foreach ($exe in @('python3.15', 'python3.14', 'python3.13', "python$PythonVersion", 'python3', 'python')) {
         if (Get-Command $exe -ErrorAction SilentlyContinue) {
-            & $exe -c $probe 2>$null
+            Invoke-Native { & $exe -c $probe 2>&1 } | Out-Null
             if ($LASTEXITCODE -eq 0) {
                 return @($exe)
             }
@@ -91,18 +105,22 @@ function Install-Python312 {
 }
 
 Write-Info "Checking for Python >= $PythonVersion..."
-$PythonCmd = Find-Python312
+# @() is required. A one-item array collapses to the item on return.
+# Not a 5.1 quirk. PowerShell 7 does this too.
+$PythonCmd = @(Find-Python312)
 if ($PythonCmd) {
-    Write-Ok ("Found: " + (& $PythonCmd[0] $PythonCmd[1..($PythonCmd.Length-1)] --version 2>&1))
+    $PythonArgs = @($PythonCmd | Select-Object -Skip 1)
+    Write-Ok ("Found: " + (Invoke-Native { & $PythonCmd[0] @PythonArgs --version 2>&1 }))
 }
 else {
     Write-Warn "No Python >= $PythonVersion was found."
     $reply = Read-Host "Install Python $PythonVersion now? [y/N]"
     if ($reply -match '^(y|yes)$') {
         Install-Python312
-        $PythonCmd = Find-Python312
+        $PythonCmd = @(Find-Python312)
         if ($PythonCmd) {
-            Write-Ok ("Installed: " + (& $PythonCmd[0] $PythonCmd[1..($PythonCmd.Length-1)] --version 2>&1))
+            $PythonArgs = @($PythonCmd | Select-Object -Skip 1)
+            Write-Ok ("Installed: " + (Invoke-Native { & $PythonCmd[0] @PythonArgs --version 2>&1 }))
         }
         else {
             Write-Err "Python >= $PythonVersion still not found after install. You may need to open a new terminal, or install it manually."
@@ -120,8 +138,8 @@ else {
 # ---------------------------------------------------------------------------
 Write-Info "Checking for virtualenv at .venv..."
 if (-not (Test-Path $VenvDir)) {
-    Write-Warn "No virtualenv found — creating one."
-    & $PythonCmd[0] $PythonCmd[1..($PythonCmd.Length-1)] -m venv $VenvDir
+    Write-Warn "No virtualenv found - creating one."
+    & $PythonCmd[0] @PythonArgs -m venv $VenvDir
     Write-Ok "Created virtualenv at $VenvDir"
 }
 else {
@@ -146,7 +164,7 @@ $ReqHash = (Get-FileHash -Algorithm SHA256 $Requirements).Hash
 Write-Info "Checking Python dependencies..."
 $installed = (Test-Path $StampFile) -and ((Get-Content $StampFile -ErrorAction SilentlyContinue) -eq $ReqHash)
 if (-not $installed) {
-    Write-Warn "Dependencies missing or out of date — installing."
+    Write-Warn "Dependencies missing or out of date - installing."
     & $VenvPython -m pip install --upgrade pip
     & $VenvPython -m pip install -r $Requirements
     Set-Content -Path $StampFile -Value $ReqHash
@@ -160,7 +178,7 @@ else {
 # 4. Run the server.
 #    Launch uvicorn as a child process and wait on it, tearing it down in a
 #    finally block so the server (and uvicorn's --reload child worker) is
-#    stopped when the script stops — including on Ctrl+C or window close.
+#    stopped when the script stops - including on Ctrl+C or window close.
 # ---------------------------------------------------------------------------
 $Port = if ($env:CRM_PORT) { $env:CRM_PORT } else { '8000' }
 Write-Info "Starting My Awesome CRM on http://localhost:$Port ..."
@@ -177,7 +195,8 @@ try {
 finally {
     if (-not $server.HasExited) {
         Write-Info "Shutting down server..."
-        # Kill the uvicorn process and its --reload child worker.
-        taskkill /PID $server.Id /T /F 2>$null | Out-Null
+        # Kill the uvicorn process and its --reload child worker. Wrapped in
+        # Invoke-Native because taskkill errors when the process already exited.
+        Invoke-Native { taskkill /PID $server.Id /T /F 2>&1 } | Out-Null
     }
 }
