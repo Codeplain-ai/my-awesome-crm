@@ -15,8 +15,9 @@ those specifications.
 *.plain                  # Root specification modules
 template/*.plain         # Reusable import modules
 resources/               # Linked text artifacts such as schemas and fixtures
-plain_modules/           # Generated implementation and unit tests
-conformance_tests/       # Generated conformance tests, grouped by module and functionality
+plain_modules/           # Generated output, one directory per module
+  <module>/code/         #   implementation and unit tests
+  <module>/tests/        #   conformance tests, one folder per functional spec
 test_scripts/            # Unit, environment-preparation, and conformance runners
 config.yaml              # codeplain CLI configuration
 ```
@@ -34,14 +35,3 @@ In addition to frontmatter `import`, ***plain supports parameterized template in
 
 Parameters are key-value pairs. Templates access them with `{{ variable_name }}`. Only variable
 substitution is supported; conditionals, loops, and other Liquid features are not available.
-
-## Comments
-
-Lines beginning with `>` are ignored during rendering:
-
-```plain
-> This is a comment in ***plain.
-```
-
-Comments explain the specification to human authors. Do not use comments to carry requirements the
-renderer must implement.

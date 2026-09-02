@@ -13,7 +13,7 @@ When writing or editing a `***definitions***` section in a `.plain` file, always
 
 ## Uniqueness
 - Concept names must be globally unique across the spec and all its imports
-- Check for collisions with imported templates, `import` and `requires` modules before adding
+- Check for collisions with concepts coming from `import` and `requires` modules before adding
 
 ## Predefined concepts (do not redefine)
 - ***plain ships several predefined concepts that are available in every module without being defined
@@ -30,6 +30,10 @@ When writing or editing a `***definitions***` section in a `.plain` file, always
 | `:UnitTests:` | Auto-generated unit tests for individual functionalities |
 | `:ConformanceTests:` | Auto-generated tests verifying conformance to the spec |
 | `:AcceptanceTest:` / `:AcceptanceTests:` | Tests validating specific aspects of the implementation |
+
+## Conciseness
+- A definition is one plain sentence plus, where needed, its attributes — see `concise-specs.md`
+- Never restate the concept name as its own definition, and never explain why the concept exists
 
 ## Define before use
 - A concept must be defined before it is referenced in any section (definitions, implementation reqs, functional specs, test reqs)
@@ -60,8 +64,8 @@ Bad — circular:
 ```
 
 ## Exported concepts are not transitive
-- If module A exports a concept and module B `requires` A, module C `requires` B does **not** gain access to A's exports
-- Shared concepts belong in a common import module
+- If module A exports a concept and module B `requires` A, a module C with `requires: [B]` does **not** gain access to A's exports
+- To use an ancestor's exports, list that ancestor in `requires` as well; concepts shared more broadly belong in a common import module
 
 ## Description quality
 - Descriptions must be clear, concise, and language-agnostic
@@ -88,7 +92,6 @@ Example of defining technical components alongside their behavior:
 - :CsvFileWriter: writes CSV rows to local files, automatically rotates to new files when size limits are reached, and flushes completed files to :StorageService:.
 
 - :CsvFileReader: reads CSV rows in a batched manner.
-
 
 - :CsvJoiner: joins csvs and uses :CsvFileWriter: to create the merged CSV.
 ```
