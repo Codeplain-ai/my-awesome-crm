@@ -217,9 +217,17 @@ runs the conformance tests, and the conformance runner requires those credential
 Then ask the agent to render, or do it yourself:
 
 ```bash
-cd plain
+cd plain                    # macOS / Linux
 codeplain hubspot.plain
 ```
+```powershell
+cd plain                    # Windows (PowerShell)
+codeplain hubspot.plain --config-name config.pwsh.yaml
+```
+
+> On Windows always pass `--config-name config.pwsh.yaml`. The default `config.yaml` wires up the
+> Bash test runners (`test_scripts/*.sh`); `config.pwsh.yaml` wires up the PowerShell ones
+> (`test_scripts/*.ps1`). Without the flag the render fails when it tries to run the tests.
 
 This generates `src/integrations/hubspot/`. The render is only green once the specs resolve **and**
 the generated integration's tests pass under `codeplain`.
@@ -280,7 +288,10 @@ What to expect from the forge this time:
 Then re-render:
 
 ```bash
-cd plain && codeplain hubspot.plain
+cd plain && codeplain hubspot.plain                                       # macOS / Linux
+```
+```powershell
+cd plain; codeplain hubspot.plain --config-name config.pwsh.yaml          # Windows (PowerShell)
 ```
 
 Restart the host, open **http://localhost:8000/**, and click **hubspot** again. In the **Records**
