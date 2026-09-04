@@ -235,11 +235,37 @@ Write-Info "  Web UI:  http://localhost:$Port/"
 Write-Info "  Swagger: http://localhost:$Port/docs"
 Write-Info "  (press Ctrl+C to stop)"
 
-$server = Start-Process -FilePath $VenvPython `
-    -ArgumentList @('-m', 'uvicorn', 'src.main:app', '--reload', '--host', '0.0.0.0', '--port', $Port) `
-    -WorkingDirectory $ProjectRoot -NoNewWindow -PassThru
+# Drop uvicorn's own startup banner. It reports the bind address
+# (http://0.0.0.0:$Port), which is not an address a browser can open - the
+# clickable localhost URLs are printed above instead. Every other line from
+# uvicorn (stderr) and from the app's JSON logger (stdout) passes through
+# untouched. Same behavior as the grep filter in scripts/start.sh.
+#
+# This needs both streams redirected, so the process is started via .NET rather
+# than Start-Process: piping a native command through Where-Object would give
+# up the process handle the teardown below needs (and, on Windows PowerShell
+# 5.1, would surface uvicorn's stderr as terminating error records).
+$BannerPattern = 'Uvicorn running on'
+$psi = New-Object System.Diagnostics.ProcessStartInfo
+$psi.FileName               = $VenvPython
+$psi.Arguments              = "-m uvicorn src.main:app --reload --host 0.0.0.0 --port $Port"
+$psi.WorkingDirectory       = $ProjectRoot
+$psi.UseShellExecute        = $false
+$psi.RedirectStandardOutput = $true
+$psi.RedirectStandardError  = $true
+
+$server = New-Object System.Diagnostics.Process
+$server.StartInfo = $psi
+$emit = { if ($EventArgs.Data -and $EventArgs.Data -notmatch $BannerPattern) { Write-Host $EventArgs.Data } }
+$subs = @(
+    Register-ObjectEvent -InputObject $server -EventName OutputDataReceived -Action $emit
+    Register-ObjectEvent -InputObject $server -EventName ErrorDataReceived  -Action $emit
+)
+[void]$server.Start()
+$server.BeginOutputReadLine()
+$server.BeginErrorReadLine()
 try {
-    Wait-Process -Id $server.Id
+    $server.WaitForExit()
 }
 finally {
     if (-not $server.HasExited) {
@@ -248,4 +274,5 @@ finally {
         # Invoke-Native because taskkill errors when the process already exited.
         Invoke-Native { taskkill /PID $server.Id /T /F 2>&1 } | Out-Null
     }
+    $subs | ForEach-Object { Unregister-Event -SubscriptionId $_.Id -ErrorAction SilentlyContinue }
 }
