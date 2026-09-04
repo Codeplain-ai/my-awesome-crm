@@ -49,8 +49,8 @@ def test_run_integration_success(client, monkeypatch, pathlib_tmpdir):
     
     monkeypatch.setenv("CRM_INTEGRATIONS_PATH", str(pathlib_tmpdir))
     
-    # Mock the module import — the current host contract is fetch(get_stored),
-    # returning a list of {data_type, data} dicts (not the old fetch_contacts()).
+    # Mock the module import — the host contract is fetch(get_stored), returning
+    # a list of {data_type, data} dicts.
     mock_module = MagicMock()
     mock_module.DATA_TYPE = "contact"
     mock_module.fetch = lambda get_stored: [
