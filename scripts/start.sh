@@ -228,9 +228,19 @@ shutdown_server() {
 }
 trap shutdown_server INT TERM EXIT
 
+# Drop uvicorn's own startup banner. It reports the bind address
+# (http://0.0.0.0:$PORT), which is not an address a browser can open — the
+# clickable localhost URLs are printed above instead. Every other line from
+# uvicorn (stderr) and from the app's JSON logger (stdout) passes through
+# untouched; --line-buffered keeps the output live rather than block-buffered.
+#
+# The filter is a process substitution, not a pipe, so $! stays uvicorn's own
+# PID and the process-group teardown above still works.
+#
 # Start uvicorn in its own process group so we can signal the whole group.
 set -m
-uvicorn src.main:app --reload --host 0.0.0.0 --port "$PORT" &
+uvicorn src.main:app --reload --host 0.0.0.0 --port "$PORT" \
+    > >(grep -v --line-buffered 'Uvicorn running on') 2>&1 &
 SERVER_PID=$!
 set +m
 wait "$SERVER_PID"
