@@ -27,7 +27,7 @@
 # environment before the tests run; shell-exported variables take precedence
 # over .env. This script is integration-agnostic - it never inspects or
 # validates any specific secret by name. Each integration validates the
-# credentials it actually needs at call time (e.g. fetch_contacts() raises if a
+# credentials it actually needs at call time (e.g. fetch(get_stored) raises if a
 # required variable is missing), and the live run surfaces that failure.
 #
 # Environment overrides:
