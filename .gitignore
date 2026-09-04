@@ -6,3 +6,4 @@ __pycache__
 codeplain.log
 crm.db
 dist
+codeplain.*.log
