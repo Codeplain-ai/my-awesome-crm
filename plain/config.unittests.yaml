@@ -1,3 +1,0 @@
-unittests-script: test_scripts/run_unittests_python.sh
-template-dir: template
-verbose: true
