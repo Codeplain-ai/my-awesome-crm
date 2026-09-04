@@ -24,4 +24,4 @@ description: "Pipedrive Integration plug-in for the CRM backend."
   - It raises `RuntimeError` naming any environment variable key that is missing or empty.
   - It follows :PipedriveRestAPI: to authenticate, read every page of persons, map every record with :PipedriveContactMapping:, and return the mapped :Contact: data dicts.
 
-- :PipedriveIntegration: exports `fetch_contacts()` from `__init__.py`.
+- :PipedriveIntegration: exports `fetch(get_stored)` from `__init__.py`.

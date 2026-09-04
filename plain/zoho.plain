@@ -27,4 +27,4 @@ description: "Zoho CRM Integration plug-in for the CRM backend."
   - It raises `RuntimeError` naming any environment variable key that is missing or empty.
   - It follows :ZohoRestAPI: to authenticate, read every page of contacts, treat a no-content response as no records, map every record with :ZohoContactMapping:, and return the mapped :Contact: data dicts.
 
-- :ZohoIntegration: exports `fetch_contacts()` from `__init__.py`.
+- :ZohoIntegration: exports `fetch(get_stored)` from `__init__.py`.

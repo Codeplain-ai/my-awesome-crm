@@ -26,4 +26,4 @@ description: "Dynamics 365 Integration plug-in for the CRM backend."
   - It raises `RuntimeError` naming any environment variable key that is missing or empty.
   - It follows :DynamicsRestAPI: to authenticate, read every page of contacts, map every record with :DynamicsContactMapping:, and return the mapped :Contact: data dicts.
 
-- :DynamicsIntegration: exports `fetch_contacts()` from `__init__.py`.
+- :DynamicsIntegration: exports `fetch(get_stored)` from `__init__.py`.

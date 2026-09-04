@@ -27,4 +27,4 @@ description: "SugarCRM Integration plug-in for the CRM backend."
   - It raises `RuntimeError` naming any required environment variable key that is missing or empty, except that `SUGARCRM_CLIENT_SECRET` may be empty for the default `sugar` client.
   - It follows :SugarCrmRestAPI: to authenticate, read every page of contacts, map every record with :SugarCrmContactMapping:, and return the mapped :Contact: data dicts.
 
-- :SugarCrmIntegration: exports `fetch_contacts()` from `__init__.py`.
+- :SugarCrmIntegration: exports `fetch(get_stored)` from `__init__.py`.

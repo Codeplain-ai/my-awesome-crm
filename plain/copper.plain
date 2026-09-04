@@ -24,4 +24,4 @@ description: "Copper Integration plug-in for the CRM backend."
   - It raises `RuntimeError` naming any environment variable key that is missing or empty.
   - It follows :CopperRestAPI: to authenticate, read every page of People, map every record with :CopperContactMapping:, and return the mapped :Contact: data dicts.
 
-- :CopperIntegration: exports `fetch_contacts()` from `__init__.py`.
+- :CopperIntegration: exports `fetch(get_stored)` from `__init__.py`.
