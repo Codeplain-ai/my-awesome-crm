@@ -138,21 +138,58 @@ else {
 # ---------------------------------------------------------------------------
 # 2. Ensure the virtualenv exists.
 # ---------------------------------------------------------------------------
+# A directory is not proof of a usable venv. An interpreter with a broken or
+# absent ensurepip builds the tree, aborts at the pip step, and leaves a
+# pip-less .venv behind - after which a bare existence check reports "already
+# exists" and the install step dies with "No module named pip". Validate the
+# way the test scripts do: Scripts\python.exe plus the pyvenv.cfg marker.
+# Use the venv's Python directly (no need to dot-source Activate.ps1).
+$VenvPython = Join-Path $VenvDir 'Scripts\python.exe'
+function Test-VenvValid {
+    (Test-Path -LiteralPath $VenvPython -PathType Leaf) -and
+    (Test-Path -LiteralPath (Join-Path $VenvDir 'pyvenv.cfg') -PathType Leaf)
+}
+
 Write-Info "Checking for virtualenv at .venv..."
+if ((Test-Path $VenvDir) -and -not (Test-VenvValid)) {
+    Write-Warn "Found an incomplete virtualenv at $VenvDir - recreating it."
+    Remove-Item -Recurse -Force $VenvDir
+}
 if (-not (Test-Path $VenvDir)) {
     Write-Warn "No virtualenv found - creating one."
     & $PythonCmd -m venv $VenvDir
+    # Remove the partial tree on failure so the next run recreates it instead of
+    # inheriting a broken one.
+    if ($LASTEXITCODE -ne 0 -or -not (Test-VenvValid)) {
+        if (Test-Path $VenvDir) { Remove-Item -Recurse -Force $VenvDir }
+        Write-Err "Failed to create a virtualenv with the selected Python."
+        Write-Err "Reinstall Python with the standard library complete and re-run."
+        exit 1
+    }
     Write-Ok "Created virtualenv at $VenvDir"
 }
 else {
     Write-Ok "Virtualenv already exists."
 }
 
-# Use the venv's Python directly (no need to dot-source Activate.ps1).
-$VenvPython = Join-Path $VenvDir 'Scripts\python.exe'
-if (-not (Test-Path $VenvPython)) {
+if (-not (Test-VenvValid)) {
     Write-Err "Expected virtualenv Python at $VenvPython but it was not found."
     exit 1
+}
+
+# pip can be absent from an otherwise well-formed venv (see above). ensurepip
+# bootstraps it; if that fails the standard library itself is incomplete.
+& $VenvPython -m pip --version *> $null
+if ($LASTEXITCODE -ne 0) {
+    Write-Warn "pip is missing from the virtualenv - bootstrapping it with ensurepip."
+    & $VenvPython -m ensurepip --upgrade *> $null
+    if ($LASTEXITCODE -ne 0) {
+        Write-Err "Could not bootstrap pip: this interpreter has no working ensurepip."
+        Write-Err "Reinstall Python with the standard library complete, then delete"
+        Write-Err "$VenvDir and re-run this script."
+        exit 1
+    }
+    Write-Ok "pip bootstrapped into the virtualenv."
 }
 
 # ---------------------------------------------------------------------------

@@ -131,10 +131,31 @@ fi
 # ---------------------------------------------------------------------------
 # 2. Ensure the virtualenv exists.
 # ---------------------------------------------------------------------------
+# A directory is not proof of a usable venv. An interpreter without ensurepip
+# (Debian/Ubuntu lacking python3-venv) builds the tree, aborts at the pip step,
+# and leaves a pip-less .venv behind — after which a bare -d check reports
+# "already exists" and the install step dies with "No module named pip".
+# Validate the way the test scripts do: bin/python plus the pyvenv.cfg marker.
+venv_is_valid() {
+    [ -x "$VENV_DIR/bin/python" ] && [ -f "$VENV_DIR/pyvenv.cfg" ]
+}
+
 info "Checking for virtualenv at .venv..."
+if [ -d "$VENV_DIR" ] && ! venv_is_valid; then
+    warn "Found an incomplete virtualenv at $VENV_DIR — recreating it."
+    rm -rf "$VENV_DIR"
+fi
 if [ ! -d "$VENV_DIR" ]; then
     warn "No virtualenv found — creating one."
-    "$PYTHON_BIN" -m venv "$VENV_DIR"
+    # Remove the partial tree on failure so the next run recreates it instead of
+    # inheriting a broken one.
+    if ! "$PYTHON_BIN" -m venv "$VENV_DIR" || ! venv_is_valid; then
+        rm -rf "$VENV_DIR"
+        error "Failed to create a virtualenv with $PYTHON_BIN."
+        error "On Debian/Ubuntu the venv module ships separately:"
+        error "  sudo apt install python3-venv   (or python3.12-venv)"
+        exit 1
+    fi
     ok "Created virtualenv at $VENV_DIR"
 else
     ok "Virtualenv already exists."
@@ -142,6 +163,20 @@ fi
 
 # shellcheck disable=SC1091
 source "$VENV_DIR/bin/activate"
+
+# pip can be absent from an otherwise well-formed venv (see above). ensurepip
+# bootstraps it — and is itself what Debian/Ubuntu ship in python3-venv, so when
+# that package is missing this fails too and the message has to say so.
+if ! python -m pip --version >/dev/null 2>&1; then
+    warn "pip is missing from the virtualenv — bootstrapping it with ensurepip."
+    if ! python -m ensurepip --upgrade >/dev/null 2>&1; then
+        error "Could not bootstrap pip: this interpreter has no working ensurepip."
+        error "On Debian/Ubuntu:  sudo apt install python3-venv   (or python3.12-venv)"
+        error "Then delete $VENV_DIR and re-run this script."
+        exit 1
+    fi
+    ok "pip bootstrapped into the virtualenv."
+fi
 
 # ---------------------------------------------------------------------------
 # 3. Ensure requirements are installed.
