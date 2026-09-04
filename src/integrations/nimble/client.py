@@ -1,61 +1,67 @@
 import os
-from typing import Any, Dict, Generator, Optional
+import logging
 import httpx
+from typing import Generator, Any, Dict
+
+logger = logging.getLogger(__name__)
 
 class NimbleClient:
-    """
-    Minimal client for the Nimble REST API v1.
-    """
-    BASE_URL = "https://app.nimble.com/api/v1"
+    """Client for the Nimble REST API v1."""
     
-    def __init__(self, access_token: Optional[str] = None):
-        token = access_token or os.environ.get("NIMBLE_ACCESS_TOKEN")
-        if not token:
-            raise RuntimeError("NIMBLE_ACCESS_TOKEN")
+    BASE_URL = "https://app.nimble.com/api/v1"
+    PAGE_SIZE = 30
 
-        self.headers = {
-            "Authorization": f"Bearer {token}",
-            "Accept": "application/json"
-        }
+    def __init__(self):
+        self.access_token = os.environ.get("NIMBLE_ACCESS_TOKEN")
+        if not self.access_token:
+            # Requirement: Raise RuntimeError naming the env var key if missing.
+            raise RuntimeError("Missing or empty environment variable: NIMBLE_ACCESS_TOKEN")
 
-    def list_contacts_page(self, record_type: str = "person", page: int = 1, per_page: int = 30) -> Dict[str, Any]:
-        """Fetches a single page of contacts."""
-        params = {
-            "record_type": record_type,
-            "page": page,
-            "per_page": per_page
-        }
-        
-        try:
-            with httpx.Client(timeout=30.0) as client:
-                response = client.get(f"{self.BASE_URL}/contacts", params=params, headers=self.headers)
-                if response.status_code == 401:
-                    raise RuntimeError(f"Nimble API authentication failed (401): {response.status_code} - {response.text}")
-                response.raise_for_status()
-                return response.json()
-        except httpx.HTTPError as e:
-            raise RuntimeError(f"HTTP request to Nimble failed: {str(e)}")
-
-    def list_all_contacts(self, record_type: str = "person") -> Generator[Dict[str, Any], None, None]:
+    def list_person_contacts(self) -> Generator[Dict[str, Any], None, None]:
         """
-        Paginates through all available contacts.
-        Follows meta.page and meta.pages counters.
+        Iterates through all person contacts using pagination based on the 
+        meta.page and meta.pages counters in the response.
         """
-        current_page = 1
-        per_page = 30
+        page = 1
         
-        while True:
-            data = self.list_contacts_page(record_type=record_type, page=current_page, per_page=per_page)
-            resources = data.get("resources", [])
-            meta = data.get("meta", {})
-            
-            for record in resources:
-                yield record
-            
-            total_pages = meta.get("pages", 1)
-            actual_page = meta.get("page", current_page)
-            
-            if actual_page >= total_pages or not resources:
-                break
-            
-            current_page = actual_page + 1
+        with httpx.Client(base_url=self.BASE_URL, timeout=30.0) as client:
+            while True:
+                logger.debug(f"Fetching Nimble contacts page {page}")
+                
+                try:
+                    response = client.get(
+                        "/contacts",
+                        params={
+                            "record_type": "person",
+                            "per_page": self.PAGE_SIZE,
+                            "page": page
+                        },
+                        headers={
+                            "Authorization": f"Bearer {self.access_token}",
+                            "Accept": "application/json"
+                        }
+                    )
+                    
+                    if response.status_code == 401:
+                        raise RuntimeError("Nimble API authentication failed (401 Unauthorized)")
+                    
+                    response.raise_for_status()
+                except httpx.HTTPError as e:
+                    logger.error(f"HTTP transport error during Nimble fetch: {str(e)}")
+                    raise RuntimeError(f"Nimble API transport error: {str(e)}")
+                
+                payload = response.json()
+                
+                resources = payload.get("resources", [])
+                for record in resources:
+                    yield record
+                
+                meta = payload.get("meta", {})
+                current_page = meta.get("page")
+                total_pages = meta.get("pages")
+                
+                # Pagination termination: stop if no resources, or we've reached the last page.
+                if not resources or current_page is None or total_pages is None or current_page >= total_pages:
+                    break
+                    
+                page = current_page + 1

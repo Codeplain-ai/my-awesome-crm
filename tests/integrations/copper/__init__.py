@@ -1,1 +1,1 @@
-# Package marker for copper integration tests
+# Empty init for pytest collection

@@ -1,9 +1,9 @@
 {
-    "source_hash": "be4ce39e4ad444649ec2b33e698186c01bd3776c939806a52684afa65348dc9a",
+    "source_hash": "9e74f036de3ffa62636d5b26fac9a60eb1e6f9875c6fb575dfa0d40001479f8e",
     "non_functional_source_hash": "577294d87f1e23540f46f83bd49cb1d52cae67394aa2aea0ff3f124394fc5514",
     "functionalities": [
         "- :SalesforceContactMapping: maps one `ContactRecord` of :SalesforceRestAPI: to a :Contact:.",
         "- :SalesforceIntegration: exposes a `fetch(get_stored)` entry point.\n  - It reads the following required environment variables:\n    - `SALESFORCE_ENDPOINT` - the Salesforce organization My Domain login URL, such as `https://your-domain.my.salesforce.com`\n    - `SALESFORCE_CLIENT_ID`\n    - `SALESFORCE_CLIENT_SECRET`\n  - It raises `RuntimeError` naming any environment variable key that is missing or empty.\n  - It follows :SalesforceRestAPI: to authenticate, read every page of contacts, map every record with :SalesforceContactMapping:, and return the mapped :Contact: data dicts.",
-        "- :SalesforceIntegration: exports `fetch_contacts()` from `__init__.py`."
+        "- :SalesforceIntegration: exports `fetch(get_stored)` from `__init__.py`."
     ]
 }

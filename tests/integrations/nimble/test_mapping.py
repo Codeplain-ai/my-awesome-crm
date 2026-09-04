@@ -1,59 +1,53 @@
 import pytest
 from src.integrations.nimble.mapping import map_contact
 
-def test_map_contact_full_info():
-    raw = {
-        "id": "500",
+def test_mapping_full_name_derivation_from_parts():
+    source = {
+        "id": "123",
+        "fields": {
+            "first name": [{"value": " John "}],
+            "last name": [{"value": "Doe"}]
+        }
+    }
+    result = map_contact(source)
+    assert result["full_name"] == "John Doe"
+
+def test_mapping_full_name_fallback_to_email():
+    source = {
+        "id": "123",
+        "fields": {
+            "email": [{"value": " work@example.com "}]
+        }
+    }
+    result = map_contact(source)
+    assert result["full_name"] == "work@example.com"
+    assert result["primary_email"] == "work@example.com"
+
+def test_mapping_full_name_fallback_to_company():
+    source = {
+        "id": "123",
+        "fields": {
+            "company": [{"value": "Acme Corp"}]
+        }
+    }
+    result = map_contact(source)
+    assert result["full_name"] == "Acme Corp"
+    assert result["company_name"] == "Acme Corp"
+
+def test_mapping_custom_fields_preserves_record_type():
+    source = {
+        "id": "123",
         "record_type": "person",
-        "fields": {
-            "first name": [{"value": "Wilma"}],
-            "last name": [{"value": "Flintstone"}],
-            "email": [{"value": " WILMA@slater.com "}],
-            "title": [{"value": "Reporter"}],
-            "company": [{"value": "Bedrock News"}]
-        }
+        "fields": {"title": [{"value": "CEO"}]}
     }
-    mapped = map_contact(raw)
-    assert mapped["provider_id"] == "nimble"
-    assert mapped["external_id"] == "500"
-    assert mapped["full_name"] == "Wilma Flintstone"
-    assert mapped["primary_email"] == "wilma@slater.com"
-    assert mapped["job_title"] == "Reporter"
-    assert mapped["company_name"] == "Bedrock News"
-    assert mapped["custom_fields"]["record_type"] == "person"
+    result = map_contact(source)
+    assert result["custom_fields"] == {"record_type": "person"}
+    assert result["job_title"] == "CEO"
 
-def test_map_contact_name_derivation_email():
-    # No names, should fallback to email
-    raw = {
-        "id": "501",
-        "fields": {
-            "email": [{"value": "barney@rubble.com"}]
-        }
-    }
-    mapped = map_contact(raw)
-    assert mapped["full_name"] == "barney@rubble.com"
-
-def test_map_contact_name_derivation_company():
-    # No names or email, should fallback to company
-    raw = {
-        "id": "502",
-        "fields": {
-            "company": [{"value": "Slate Rock and Gravel"}]
-        }
-    }
-    mapped = map_contact(raw)
-    assert mapped["full_name"] == "Slate Rock and Gravel"
-
-def test_map_contact_empty_values():
-    raw = {
-        "id": "503",
-        "fields": {
-            "first name": [{"value": ""}],
-            "last name": [{"value": None}],
-            "email": []
-        }
-    }
-    mapped = map_contact(raw)
-    assert mapped["full_name"] == ""
-    assert mapped["primary_email"] is None
-    assert mapped["job_title"] is None
+def test_mapping_empty_record_returns_defaults():
+    # Requirement: The mapping function does not raise for record content.
+    source = {"id": "456", "fields": {}}
+    result = map_contact(source)
+    assert result["full_name"] == ""
+    assert result["external_id"] == "456"
+    assert result["primary_email"] is None

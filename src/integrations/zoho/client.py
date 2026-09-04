@@ -1,32 +1,45 @@
-import logging
-from typing import Any, Dict, List, Optional
+import os
 import httpx
+import logging
+from typing import Any, Dict, List
 
 logger = logging.getLogger(__name__)
 
 class ZohoClient:
     """
-    Client for Zoho CRM v3 REST API.
-    Grounded in resources/zoho/openapi.yaml.
+    Handles communication with the Zoho CRM v3 REST API.
+    Follows the surface defined in [resource]resources/zoho/openapi.yaml.
     """
-    def __init__(
-        self,
-        accounts_host: str,
-        api_host: str,
-        client_id: str,
-        client_secret: str,
-        refresh_token: str,
-    ):
-        self.accounts_host = accounts_host.rstrip("/")
-        self.api_host = api_host.rstrip("/")
-        self.client_id = client_id
-        self.client_secret = client_secret
-        self.refresh_token = refresh_token
-        self.access_token: Optional[str] = None
+    def __init__(self):
+        self.accounts_host = os.environ.get("ZOHO_ACCOUNTS_HOST")
+        self.api_host = os.environ.get("ZOHO_API_HOST")
+        self.client_id = os.environ.get("ZOHO_CLIENT_ID")
+        self.client_secret = os.environ.get("ZOHO_CLIENT_SECRET")
+        self.refresh_token = os.environ.get("ZOHO_REFRESH_TOKEN")
+        self.access_token: str | None = None
 
-    def _get_access_token(self) -> str:
-        """Acquires a fresh access token via refresh-token grant."""
-        url = f"{self.accounts_host}/oauth/v2/token"
+    def _validate_env(self) -> None:
+        """Validates that all required environment variables are present."""
+        required = {
+            "ZOHO_ACCOUNTS_HOST": self.accounts_host,
+            "ZOHO_API_HOST": self.api_host,
+            "ZOHO_CLIENT_ID": self.client_id,
+            "ZOHO_CLIENT_SECRET": self.client_secret,
+            "ZOHO_REFRESH_TOKEN": self.refresh_token,
+        }
+        missing = [k for k, v in required.items() if not v]
+        if missing:
+            raise RuntimeError(f"Missing required environment variables: {', '.join(missing)}")
+
+    def authenticate(self) -> None:
+        """
+        Mints a fresh access token using the refresh_token grant.
+        Endpoint: POST {ZOHO_ACCOUNTS_HOST}/oauth/v2/token
+        """
+        self._validate_env()
+
+        # accounts_host is validated non-empty by _validate_env
+        url = f"{self.accounts_host.rstrip('/')}/oauth/v2/token"
         data = {
             "grant_type": "refresh_token",
             "client_id": self.client_id,
@@ -34,64 +47,72 @@ class ZohoClient:
             "refresh_token": self.refresh_token,
         }
         
-        response = httpx.post(url, data=data)
-        if response.status_code != 200:
-            logger.error(
-                f"Zoho token refresh failed: {response.status_code}",
-                extra={"body": response.text}
-            )
-            raise RuntimeError(f"Failed to refresh Zoho token: {response.text}")
+        try:
+            response = httpx.post(url, data=data, timeout=30.0)
+            if response.status_code != 200:
+                raise RuntimeError(
+                    f"Zoho auth failed with status {response.status_code}: {response.text}"
+                )
             
-        token_data = response.json()
-        if "access_token" not in token_data:
-            raise RuntimeError(f"Zoho token response missing access_token: {token_data}")
+            token_data = response.json()
+            if "access_token" not in token_data:
+                raise RuntimeError(f"Zoho auth response missing 'access_token': {token_data}")
+                
+            self.access_token = token_data["access_token"]
+            logger.info("Successfully authenticated with Zoho CRM")
             
-        return token_data["access_token"]
+        except httpx.RequestError as e:
+            raise RuntimeError(f"Failed to connect to Zoho Accounts: {str(e)}") from e
 
-    def fetch_contacts_page(self, page: int = 1) -> tuple[List[Dict[str, Any]], bool]:
+    def list_contacts(self) -> List[Dict[str, Any]]:
         """
-        Fetches one page of contacts.
-        Returns (list of records, has_more_records).
+        Fetches all contacts from Zoho using the Contacts module API.
+        Handles pagination until no more records are available.
+        Endpoint: GET {ZOHO_API_HOST}/crm/v3/Contacts
         """
         if not self.access_token:
-            self.access_token = self._get_access_token()
+            raise RuntimeError("Client not authenticated. Call authenticate() first.")
 
-        url = f"{self.api_host}/crm/v3/Contacts"
-        params = {
-            "fields": "id,Full_Name,First_Name,Last_Name,Email,Title,Account_Name",
-            "per_page": 200,
-            "page": page,
-        }
-        headers = {"Authorization": f"Zoho-oauthtoken {self.access_token}"}
-
-        response = httpx.get(url, params=params, headers=headers)
-
-        if response.status_code == 204:
-            return [], False
-            
-        if response.status_code != 200:
-            logger.error(
-                f"Zoho listContacts failed: {response.status_code}",
-                extra={"body": response.text}
-            )
-            raise RuntimeError(f"Failed to fetch Zoho contacts: {response.text}")
-
-        payload = response.json()
-        records = payload.get("data", [])
-        info = payload.get("info", {})
-        has_more = info.get("more_records", False)
-
-        return records, has_more
-
-    def fetch_all_contacts(self) -> List[Dict[str, Any]]:
-        """Iterates through all pages of contacts."""
-        all_records = []
+        contacts = []
         page = 1
-        has_more = True
+        more_records = True
         
-        while has_more:
-            records, has_more = self.fetch_contacts_page(page)
-            all_records.extend(records)
-            page += 1
+        while more_records:
+            # api_host is validated non-empty by _validate_env
+            url = f"{self.api_host.rstrip('/')}/crm/v3/Contacts"
+            params = {
+                "fields": "id,Full_Name,First_Name,Last_Name,Email,Title,Account_Name",
+                "per_page": 200,
+                "page": page
+            }
+            headers = {"Authorization": f"Zoho-oauthtoken {self.access_token}"}
             
-        return all_records
+            try:
+                response = httpx.get(url, params=params, headers=headers, timeout=60.0)
+                
+                # Zoho returns 204 No Content when no records exist or no further page
+                if response.status_code == 204:
+                    logger.debug(f"Zoho returned 204 No Content for page {page}")
+                    break
+                
+                if response.status_code != 200:
+                    raise RuntimeError(
+                        f"Zoho API error for page {page} (Status {response.status_code}): {response.text}"
+                    )
+                
+                data = response.json()
+                page_data = data.get("data", [])
+                if not page_data:
+                    break
+                    
+                contacts.extend(page_data)
+                
+                info = data.get("info", {})
+                more_records = info.get("more_records", False)
+                page += 1
+                
+            except httpx.RequestError as e:
+                raise RuntimeError(f"Failed to connect to Zoho API: {str(e)}") from e
+            
+        logger.info(f"Fetched {len(contacts)} contacts from Zoho CRM")
+        return contacts

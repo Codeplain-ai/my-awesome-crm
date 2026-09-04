@@ -3,83 +3,82 @@ from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
 
-def map_contact(raw: Dict[str, Any]) -> Dict[str, Any]:
+def map_contact(record: Dict[str, Any]) -> Dict[str, Any]:
     """
-    Implements :SugarCrmContactMapping: for a single SugarCRM Contact record.
-    Ref: [resource]resources/sugarcrm/contact-mapping.md
+    Pure transformation from SugarCRM ContactRecord to host Contact shape.
+    Strictly follows [resource]resources/sugarcrm/contact-mapping.md.
     """
     # 1. Primary Email Selection
-    email_val = None
-    email_list = raw.get("email")
-    if isinstance(email_list, list) and len(email_list) > 0:
-        # Find primary_address entry
-        primary_entry = next(
-            (e for e in email_list if e.get("primary_address") is True or str(e.get("primary_address")).lower() == "true"),
-            None
-        )
-        if primary_entry:
-            email_val = primary_entry.get("email_address")
-        
-        # Fallback to first non-empty email_address if no primary
-        if not email_val:
-            email_val = next(
-                (e.get("email_address") for e in email_list if e.get("email_address")),
-                None
-            )
+    primary_email = _select_primary_email(record)
 
-    # Fallback to flat email1 field
-    if not email_val:
-        email_val = raw.get("email1")
+    # 2. Full Name Derivation
+    full_name = _derive_full_name(record, primary_email)
 
-    # Canonicalize email
-    primary_email = None
-    if email_val and isinstance(email_val, str):
-        stripped_email = email_val.strip()
-        if stripped_email:
-            primary_email = stripped_email.lower()
-
-    # 2. full_name Derivation
-    full_name = ""
-    # Rule 1: full_name or name
-    fn_field = raw.get("full_name")
-    n_field = raw.get("name")
-    if fn_field and str(fn_field).strip():
-        full_name = str(fn_field).strip()
-    elif n_field and str(n_field).strip():
-        full_name = str(n_field).strip()
-    else:
-        # Rule 2: first + last
-        first = str(raw.get("first_name") or "").strip()
-        last = str(raw.get("last_name") or "").strip()
-        joined = f"{first} {last}".strip()
-        if joined:
-            full_name = joined
-        elif primary_email:
-            # Rule 3: primary_email trimmed
-            full_name = email_val.strip() if email_val else ""
-
-    # 3. Custom Fields
-    # Rule: capture provenance timestamps, exclude business keys and API metadata (_)
-    business_keys = {
-        "id", "first_name", "last_name", "name", "full_name",
-        "email", "email1",
-        "title", "account_name"
-    }
+    # 3. Custom Fields (provenance only)
     custom_fields = {}
-    for k, v in raw.items():
-        if k in ("date_entered", "date_modified") and v is not None:
-            custom_fields[k] = v
-        elif k not in business_keys and not k.startswith("_"):
-            # Per contract: only date_entered/date_modified are explicitly listed 
-            # for inclusion, but we follow the exclusion rules for safety.
-            pass
+    if record.get("date_entered"):
+        custom_fields["date_entered"] = record["date_entered"]
+    if record.get("date_modified"):
+        custom_fields["date_modified"] = record["date_modified"]
 
+    # 4. Construct Output
     return {
         "provider_id": "sugarcrm",
-        "external_id": raw.get("id"),
+        "external_id": record.get("id"),
         "full_name": full_name,
         "primary_email": primary_email,
-        "job_title": raw.get("title") or None,
-        "company_name": raw.get("account_name") or None,
-        "custom_fields": custom_fields,
+        "job_title": record.get("title") or None,
+        "company_name": record.get("account_name") or None,
+        "custom_fields": custom_fields
     }
+
+def _select_primary_email(record: Dict[str, Any]) -> Optional[str]:
+    """Logic for primary_email selection rules."""
+    email_list: List[Dict[str, Any]] = record.get("email") or []
+    selected = None
+
+    # Try structured email array
+    for entry in email_list:
+        if entry.get("primary_address"):
+            selected = entry.get("email_address")
+            break
+    
+    if not selected:
+        for entry in email_list:
+            addr = entry.get("email_address")
+            if addr:
+                selected = addr
+                break
+    
+    # Fallback to flat field email1
+    if not selected:
+        selected = record.get("email1")
+
+    if selected:
+        return selected.strip().lower()
+    return None
+
+def _derive_full_name(record: Dict[str, Any], selected_email: Optional[str]) -> str:
+    """Logic for full_name derivation rules."""
+    # 1. Check full_name or name
+    fn = record.get("full_name")
+    if fn and fn.strip():
+        return fn.strip()
+    
+    n = record.get("name")
+    if n and n.strip():
+        return n.strip()
+    
+    # 2. Join first/last
+    first = record.get("first_name") or ""
+    last = record.get("last_name") or ""
+    joined = f"{first} {last}".strip()
+    if joined:
+        return joined
+    
+    # 3. Email fallback
+    if selected_email:
+        return selected_email.strip()
+    
+    # 4. Empty string
+    return ""

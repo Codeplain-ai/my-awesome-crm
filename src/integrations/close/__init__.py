@@ -1,80 +1,55 @@
 import logging
 import os
-from typing import Any, Callable, List, Dict
+from typing import Any, Callable, List
 
-import httpx
-
-from .mapping import map_close_contact
+from .client import CloseClient
+from .mapping import map_contact
 
 logger = logging.getLogger(__name__)
 
-# The data_type this integration produces.
+# Module-level DATA_TYPE for records produced by this integration
 DATA_TYPE = "contact"
 
-__all__ = ["DATA_TYPE", "fetch"]
-
-def fetch(get_stored: Callable[[str], List[Dict[str, Any]]]) -> List[Dict[str, Any]]:
+def fetch(get_stored: Callable[[str], List[dict[str, Any]]]) -> List[dict[str, Any]]:
     """
-    Fetches contacts from the Close REST API and maps them to the host's Contact format.
-    
-    Args:
-        get_stored: A callback to retrieve existing records (unused in this specific pull).
-        
-    Returns:
-        A list of dicts, each containing 'data_type' and 'data' (the mapped contact).
+    Fetch contacts from Close CRM and map them to the host's Record format.
+    Exposes the required plug-in interface for the ingest service.
     """
     api_key = os.environ.get("CLOSE_API_KEY")
     if not api_key:
-        raise RuntimeError("Missing required environment variable: CLOSE_API_KEY")
+        logger.error("Required environment variable CLOSE_API_KEY is missing")
+        raise RuntimeError("CLOSE_API_KEY")
 
-    base_url = "https://api.close.com/api/v1/contact/"
-    # Close uses Basic Auth with API Key as username and blank password
-    auth = (api_key, "")
-    limit = 100
-    skip = 0
-    results = []
-
+    client = CloseClient(api_key)
+    produced_records = []
+    
     try:
-        with httpx.Client(auth=auth, timeout=60.0) as client:
-            has_more = True
-            while has_more:
-                params = {"_limit": limit, "_skip": skip}
-                response = client.get(base_url, params=params)
-
-                if response.status_code == 401:
-                    raise RuntimeError(
-                        f"Authentication failed for Close API. Check CLOSE_API_KEY. "
-                        f"Response: {response.text}"
-                    )
-                
-                if response.status_code != 200:
-                    logger.error(
-                        "Unexpected response from Close API",
-                        extra={"status_code": response.status_code, "body": response.text, "skip": skip}
-                    )
-                    response.raise_for_status()
-
-                page_data = response.json()
-                contacts = page_data.get("data", [])
-                
-                for contact in contacts:
-                    mapped = map_close_contact(contact)
-                    results.append({
+        for contact_batch in client.list_contacts():
+            for raw_contact in contact_batch:
+                try:
+                    mapped_data = map_contact(raw_contact)
+                    produced_records.append({
                         "data_type": DATA_TYPE,
-                        "data": mapped
+                        "data": mapped_data
                     })
+                except ValueError as e:
+                    # Per-record skip-and-log policy for mapping errors
+                    contact_id = raw_contact.get("id", "unknown")
+                    logger.warning(
+                        f"Skipping Close contact {contact_id} due to mapping error: {str(e)}"
+                    )
+                except Exception as e:
+                    # Unexpected errors in mapping logic are logged, but processing continues
+                    contact_id = raw_contact.get("id", "unknown")
+                    logger.error(
+                        f"Unexpected error mapping Close contact {contact_id}: {str(e)}",
+                        exc_info=True
+                    )
+                    continue
+                    
+    except Exception as e:
+        # Re-raise to ensure host commits no partial writes on fetch failure
+        logger.error(f"Integration 'close' failed: {str(e)}")
+        raise
 
-                has_more = page_data.get("has_more", False)
-                if has_more:
-                    skip += len(contacts)
-                    # Safety check to prevent infinite loops if API behaves unexpectedly
-                    if len(contacts) == 0:
-                        logger.warning("Close API reported 'has_more' but returned 0 records. Breaking.")
-                        break
-
-    except httpx.RequestError as exc:
-        msg = f"An error occurred while requesting {exc.request.url!r}: {exc}"
-        logger.error(msg, exc_info=True)
-        raise RuntimeError(f"Transport/HTTP error connecting to Close: {str(exc)}")
-
-    return results
+    return produced_records

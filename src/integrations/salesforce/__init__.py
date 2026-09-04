@@ -1,59 +1,64 @@
 import logging
+import os
 from typing import Any, Callable, List
 
 from .client import SalesforceClient
-from .mapping import map_contact
-
-# Provider identifier as required by :Provider: definition
-DATA_TYPE = "contact"
-SOURCE = "salesforce"
+from .mapping import map_contact_record
 
 logger = logging.getLogger(__name__)
 
-def fetch_contacts(get_stored: Callable[[str], List[dict[str, Any]]]) -> List[dict[str, Any]]:
-    """
-    Fetches contacts from Salesforce and returns them in the host's expected format.
-    Exposed specifically for contact ingestion.
-    """
-    return fetch(get_stored)
-
+# Provider identifier
+DATA_TYPE = "contact"
 
 def fetch(get_stored: Callable[[str], List[dict[str, Any]]]) -> List[dict[str, Any]]:
     """
-    Primary entry point for the Salesforce integration.
-    Fetches contacts from Salesforce REST API and maps them to the conventional Contact shape.
+    Entry point for the Salesforce integration.
+    Fetches contacts from Salesforce REST API and maps them to the host format.
     """
-    client = SalesforceClient()
+    # 1. Credentials from environment
+    endpoint = os.environ.get("SALESFORCE_ENDPOINT")
+    client_id = os.environ.get("SALESFORCE_CLIENT_ID")
+    client_secret = os.environ.get("SALESFORCE_CLIENT_SECRET")
+
+    if not all([endpoint, client_id, client_secret]):
+        missing = [k for k, v in {
+            "SALESFORCE_ENDPOINT": endpoint,
+            "SALESFORCE_CLIENT_ID": client_id,
+            "SALESFORCE_CLIENT_SECRET": client_secret
+        }.items() if not v]
+        raise RuntimeError(f"Missing required Salesforce credentials: {', '.join(missing)}")
+
+    # 2. Initialize client and fetch
+    client = SalesforceClient(endpoint, client_id, client_secret)
     
-    # The host logic handles idempotency via upserts based on external_id.
-    # We fetch all relevant records from the provider.
-    raw_records = client.get_all_contacts()
+    # get_stored is provided by the host but not strictly required for 
+    # simple upsert logic unless we wanted to do delta-detection here.
+    # The host ingest.py handles the actual upsert comparison.
     
-    produced_records = []
+    all_mapped_records = []
     
-    for raw_record in raw_records:
-        try:
-            # Apply mapping logic
-            mapped_data = map_contact(raw_record)
-            
-            # Wrap in the format expected by the host ingest service
-            produced_records.append({
-                "data_type": DATA_TYPE,
-                "data": mapped_data
-            })
-        except ValueError as e:
-            # Skip-and-log batch policy as per :ImplementationReqs:
-            external_id = raw_record.get("Id", "unknown")
-            logger.warning(
-                f"Skipping record {external_id} from {SOURCE} due to mapping error: {str(e)}",
-                extra={"provider_id": SOURCE, "external_id": external_id}
-            )
-        except Exception as e:
-            # Unexpected errors in mapping are also caught to preserve batch integrity
-            external_id = raw_record.get("Id", "unknown")
-            logger.error(
-                f"Unexpected error mapping record {external_id} from {SOURCE}: {str(e)}",
-                exc_info=True
-            )
-            
-    return produced_records
+    try:
+        for record in client.get_all_contacts():
+            external_id = record.get("Id", "unknown")
+            try:
+                mapped_data = map_contact_record(record)
+                all_mapped_records.append({
+                    "data_type": "contact",
+                    "data": mapped_data
+                })
+            except ValueError as ve:
+                # Per-record skip-and-log policy
+                logger.warning(
+                    f"Skipping Salesforce contact {external_id} due to mapping error: {ve}"
+                )
+            except Exception as e:
+                logger.error(
+                    f"Unexpected error mapping Salesforce contact {external_id}: {e}",
+                    exc_info=True
+                )
+                # We continue with other records as per policy
+    except Exception as e:
+        logger.error(f"Salesforce fetch failed: {e}", exc_info=True)
+        raise RuntimeError(f"Failed to fetch data from Salesforce: {e}")
+
+    return all_mapped_records

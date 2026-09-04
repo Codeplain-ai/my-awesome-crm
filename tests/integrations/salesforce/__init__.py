@@ -1,1 +1,1 @@
-# Marker for pytest collection
+# Marker file for pytest package discovery

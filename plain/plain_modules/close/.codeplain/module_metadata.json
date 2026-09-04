@@ -1,9 +1,9 @@
 {
-    "source_hash": "700529b97d0db173f0c68f4085e53acc71c11d9b13ddbeadb001d8feb8bc6092",
-    "non_functional_source_hash": "8a8c577f07cc591269a0c71ffd192165650afb39e97ac316d4e9627805241387",
+    "source_hash": "631be28debf9e41711c5940149cd87423bf25356aae36ab945aa8ab4263abe75",
+    "non_functional_source_hash": "1d2908bf7a90c01110ce82c48e78a59b52e699ed74690d39a21dbc2f260bfd5c",
     "functionalities": [
-        "- Implement a function that implements :CloseContactMapping: as a pure function within the integration package.",
-        "- Implement :CloseIntegration:'s `fetch(get_stored)` entry point.\n  - The entry point accepts the host's `get_stored` callback; this integration does not need to read already-stored records, so it may ignore the callback.\n  - Read :CloseCredentials: from environment variables. If any required variable is missing or empty, raise `RuntimeError` with a message naming the missing environment variable key (e.g. `CLOSE_API_KEY`).\n  - Send the HTTP Basic authorization header per :CloseRestAPI: on every request, with the API key as the username and a blank password.\n  - Request the first page of contacts from the contact list endpoint of :CloseRestAPI: with its pinned `_limit` page size.\n  - Read every subsequent page per the pagination envelope of :CloseRestAPI: until `has_more` is false.\n  - For each record across all pages, map it with :CloseContactMapping: to a :Contact: data dict.\n  - Return the list of mapped :Contact: data dicts; the host stores them verbatim.",
-        "- Wire :CloseIntegration: into the host's runtime discovery surface.\n  - `src/integrations/close/__init__.py` exposes the module-level `DATA_TYPE` set to `contact` and the top-level callable `fetch` as the package's public entry point.\n    - The package's public API is declared as exactly `DATA_TYPE` and `fetch`, for example through `__all__`.\n    - Internal helper modules (such as a mapping module) are implementation details; `__init__.py` may import them, and they need not be removed from the package namespace."
+        "- :CloseContactMapping: maps one `ContactRecord` of :CloseRestAPI: to a :Contact:.",
+        "- :CloseIntegration: exposes a `fetch(get_stored)` entry point.\n  - It reads the following required environment variable:\n    - `CLOSE_API_KEY` - the Close API key used as the HTTP Basic username with an empty password\n  - It raises `RuntimeError` naming the environment variable key when it is missing or empty.\n  - It follows :CloseRestAPI: to authenticate, read every page of contacts, map every record with :CloseContactMapping:, and return the mapped :Contact: data dicts.",
+        "- :CloseIntegration: exports `fetch(get_stored)` from `__init__.py`."
     ]
 }
