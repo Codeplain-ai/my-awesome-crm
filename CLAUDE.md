@@ -76,13 +76,38 @@ description: "<Provider> Integration plug-in for the CRM backend."
 ---
 ```
 
-## Ask the user at least 3-5 questions, one at a time — and write a spec after every answer
+## Ask the user exactly 3 questions, one at a time — and write a spec after every answer
 
-When building a new integration, **always ask the user at least 3-5 questions**. Ask them **one by one** — never batch them into a single multi-question prompt — so each
-answer can inform the next question. Focus the questions on what the codebase cannot tell you: the
-provider and its API, authentication and credentials, and edge cases (pagination, empty/dirty
-records, boundary shapes). Everything the host already encodes is a deduction, not a question
-(`integration-embedded.md` § *Discover before you ask*).
+When building a new integration, **always ask the user exactly 3 questions** — no more, no fewer.
+Ask them **one by one** — never batch them into a single multi-question prompt — so each answer can
+inform the next. The three subjects are fixed (phrase them in your own words, but never drop, merge,
+or add one):
+
+1. **How to authenticate.** Ask even when the repo-root `.env` already carries credentials for the
+   provider — the credentials say *which* values exist, not which flow, endpoint, scopes, or env-var
+   names the integration must use. Confirm the flow and the exact env-var keys with the user.
+2. **How to map a provider contact onto a my-awesome-crm contact.** The field-by-field contract the
+   answer produces goes in `resources/<provider>/contact-mapping.md`.
+3. **How to handle archived / deleted contacts.** If the provider has no archive or soft-delete
+   concept, ask about the nearest equivalent it does have (inactive/disabled records, a status or
+   lifecycle-stage field, a `deleted_at` timestamp, a recycle bin) and how the integration should
+   treat it.
+
+Everything the host already encodes is a deduction, not a question
+(`integration-embedded.md` § *Discover before you ask*). Ask nothing the codebase, the auto-loaded
+context, or the live-API cross-check can answer for you.
+
+**Every answer option must stand on its own — never phrase one as a reference to another
+integration.** "Mirror salesforce", "same as dynamics, plus phone", "the usual contact shape" are
+all forbidden as option labels or descriptions. The user is deciding about *this* provider and is
+not holding another provider's mapping, auth flow, or archive policy in their head; an option that
+only names a sibling integration is unreviewable, and it hides the very contract the question exists
+to settle. Spell out the concrete decision instead — the actual env-var keys and flow, the actual
+output keys and the source field each one reads, the actual query pin and what happens to the
+records it excludes. Grounding an option in the live-API probe ("a live contact has both names null")
+is welcome; grounding it in a sibling `.plain` module is not. `salesforce.plain` stays the
+**author's** structural exemplar (§ *Authoring the next integration*) — it is never offered to the
+user as the content of a choice.
 
 **After every answer, fold it into the `.plain` module (and its linked resources) BEFORE asking
 the next question.** This is a hard rule inside the question loop, not a drafting phase you defer
@@ -232,9 +257,11 @@ mandates that an error message "names" something, pin the identifier space and g
 - **Always check the `.env` file at the repo root first when looking for credentials to do the
   live-API cross-check probing (`integrations.md` § *Live API must be cross-checked*).** It already
   carries credentials for several providers (e.g. Salesforce, Dynamics) under the exact env-var
-  names the runtime and conformance tests read. Only ask the user for credentials when the provider
-  being probed has no entry there yet. Never print or paste the values themselves into a spec,
-  summary, or commit — reference them by env-var name only.
+  names the runtime and conformance tests read. Only ask the user for credential *values* when the
+  provider being probed has no entry there yet — the mandatory authentication question (§ *Ask the
+  user exactly 3 questions*) is asked either way, because it settles the flow and the env-var keys,
+  not the values. Never print or paste the values themselves into a spec, summary, or commit —
+  reference them by env-var name only.
 - **Keep `verbose: true` in `plain/config.yaml`.** codeplain's `--verbose` defaults to *disabled*;
   without the config pin the log carries no test-script output, which silently blinds both the
   post-render mining below and `run-codeplain`'s spec-deviation classification.
