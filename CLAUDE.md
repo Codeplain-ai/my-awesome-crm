@@ -140,7 +140,7 @@ layout/identifier contract, the `:UnitTests:` policy, the host ground-truth link
 - **3 functional specs** (each a single top-level bullet, mirroring salesforce):
   1. "`:<Provider>ContactMapping:` maps one `ContactRecord` of `:<Provider>RestAPI:` to a `:Contact:`." — one line, **no** sub-bullets; the field-by-field contract lives entirely in the mapping doc.
   2. "`:<Provider>Integration:` exposes a `fetch(get_stored)` entry point." — with sub-bullets that name the required environment variables, state it "raises `RuntimeError` naming any environment variable key that is missing or empty", and say it "follows `:<Provider>RestAPI:` to authenticate, read every page of contacts, map every record with `:<Provider>ContactMapping:`, and return the mapped `:Contact:` data dicts."
-  3. "`:<Provider>Integration:` exports `fetch_contacts()` from `__init__.py`." — the host plug-in contract (the top-level `fetch(get_stored)` callable) comes from `crm_common`; this spec adds only the provider's exported entry point. There is no `DATA_TYPE` attribute — each record carries its own `data_type`.
+  3. "`:<Provider>Integration:` exports `fetch(get_stored)` from `__init__.py`." — the module-level export surface the host discovers. The exported symbol is **`fetch`, and only `fetch`**: `src/services/ingest.py` resolves an integration by `getattr(module, "fetch")` and calls nothing else, so a provider-named alias (`fetch_contacts()`) is dead surface — never spec one. There is likewise no `DATA_TYPE` attribute — each record carries its own `data_type`.
 
 ### The whole API surface lives in `resources/<provider>/openapi.yaml`, reached through one concept
 
@@ -201,8 +201,8 @@ requirement in the module.
 
 Do not pin internal file names (`client.py`, `mapping.py`), private function names
 (`_acquire_token`, `_get_json`), or per-file re-export wording. The contract is behavior plus the
-`__init__.py` exports — the top-level `fetch(get_stored)` callable (from `crm_common`) and the
-provider's exported entry point (`fetch_contacts()` in the exemplar). Evidence this is real: after the mandates were removed, the re-render
+`__init__.py` export — the top-level `fetch(get_stored)` callable, and nothing else (no
+provider-named alias). Evidence this is real: after the mandates were removed, the re-render
 **deleted `client.py`** and folded the client logic into `__init__.py` — correct per the contract.
 Two costs to watch:
 
