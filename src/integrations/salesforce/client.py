@@ -1,77 +1,72 @@
-import os
 import httpx
-from typing import Any, Dict, List, Optional
+from typing import Any, Generator
 
 class SalesforceClient:
     """
-    Client for Salesforce REST API surface.
-    Handles authentication and paginated queries.
+    Minimal Salesforce REST API client focused on Contact retrieval.
     """
-    def __init__(self):
-        self.client_id = os.environ.get("SALESFORCE_CLIENT_ID")
-        self.client_secret = os.environ.get("SALESFORCE_CLIENT_SECRET")
-        self.endpoint = os.environ.get("SALESFORCE_ENDPOINT")  # Login host
+    def __init__(self, endpoint: str, client_id: str, client_secret: str):
+        self.endpoint = endpoint.rstrip("/")
+        self.client_id = client_id
+        self.client_secret = client_secret
+        self._access_token = None
+        self._instance_url = None
 
-        missing = []
-        if not self.client_id:
-            missing.append("SALESFORCE_CLIENT_ID")
-        if not self.client_secret:
-            missing.append("SALESFORCE_CLIENT_SECRET")
-        if not self.endpoint:
-            missing.append("SALESFORCE_ENDPOINT")
-
-        if missing:
-            raise RuntimeError(f"Missing required Salesforce environment variables: {', '.join(missing)}")
-
-    def _get_access_token(self) -> tuple[str, str]:
-        """Acquires OAuth2 token using client_credentials flow."""
-        url = f"{self.endpoint.rstrip('/')}/services/oauth2/token"
+    def _authenticate(self):
+        """Acquires a bearer token using client_credentials flow."""
+        token_url = f"{self.endpoint}/services/oauth2/token"
         data = {
             "grant_type": "client_credentials",
             "client_id": self.client_id,
-            "client_secret": self.client_secret
+            "client_secret": self.client_secret,
         }
         
-        with httpx.Client() as client:
-            response = client.post(url, data=data)
+        try:
+            response = httpx.post(token_url, data=data, timeout=10.0)
             if response.status_code != 200:
-                raise RuntimeError(f"Salesforce auth failed: {response.text}")
+                raise RuntimeError(
+                    f"Salesforce authentication failed ({response.status_code}): {response.text}"
+                )
+        except httpx.RequestError as e:
+            raise RuntimeError(f"Failed to connect to Salesforce for authentication: {str(e)}")
             
-            payload = response.json()
-            return payload["access_token"], payload["instance_url"]
+        payload = response.json()
+        self._access_token = payload["access_token"]
+        self._instance_url = payload["instance_url"].rstrip("/")
 
-    def get_all_contacts(self) -> List[Dict[str, Any]]:
-        """Fetches all contacts using the SOQL query defined in OpenAPI."""
-        access_token, instance_url = self._get_access_token()
-        
-        # SOQL query pinned by OpenAPI spec
-        query = "SELECT Id, Name, FirstName, LastName, Email, Title, Account.Name FROM Contact"
+    def get_all_contacts(self) -> Generator[dict[str, Any], None, None]:
+        """Queries Salesforce for contacts, handling pagination."""
+        if not self._access_token:
+            self._authenticate()
+
+        # Initial query
+        soql = "SELECT Id, Name, FirstName, LastName, Email, Title, Account.Name FROM Contact"
+        url = f"{self._instance_url}/services/data/v60.0/query/"
+        params = {"q": soql}
         
         headers = {
-            "Authorization": f"Bearer {access_token}",
+            "Authorization": f"Bearer {self._access_token}",
             "Accept": "application/json"
         }
-        
-        records = []
-        # Initial request
-        url = f"{instance_url.rstrip('/')}/services/data/v60.0/query/"
-        params = {"q": query}
-        
-        with httpx.Client(headers=headers) as client:
-            resp = client.get(url, params=params)
-            if resp.status_code != 200:
-                raise RuntimeError(f"Salesforce query failed: {resp.text}")
-            
-            data = resp.json()
-            records.extend(data.get("records", []))
-            
-            # Multi-page pagination: follow nextRecordsUrl
-            while not data.get("done", True) and "nextRecordsUrl" in data:
-                next_url = f"{instance_url.rstrip('/')}{data['nextRecordsUrl']}"
-                resp = client.get(next_url)
-                if resp.status_code != 200:
-                    raise RuntimeError(f"Salesforce pagination failed: {resp.text}")
-                data = resp.json()
-                records.extend(data.get("records", []))
+
+        while url:
+            try:
+                response = httpx.get(url, params=params, headers=headers, timeout=30.0)
+                if response.status_code != 200:
+                    raise RuntimeError(
+                        f"Salesforce query failed ({response.status_code}): {response.text}"
+                    )
                 
-        return records
+                data = response.json()
+                for record in data.get("records", []):
+                    yield record
+
+                # Handle pagination: nextRecordsUrl is a relative path
+                next_path = data.get("nextRecordsUrl")
+                if next_path and not data.get("done", True):
+                    url = f"{self._instance_url}{next_path}"
+                    params = None  # SOQL query 'q' is not sent on subsequent pages
+                else:
+                    url = None
+            except httpx.RequestError as e:
+                raise RuntimeError(f"Network error during Salesforce query: {str(e)}")

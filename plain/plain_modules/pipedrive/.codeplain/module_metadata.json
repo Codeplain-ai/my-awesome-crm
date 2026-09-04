@@ -1,9 +1,9 @@
 {
-    "source_hash": "0fa935ddeb96c5477d4a4f0d7051fd4e170803fde14c951a24d37f26dd6fbc8a",
-    "non_functional_source_hash": "9707e7d43135d09c66a861086a3ef20ee6a5f2bba6f4530ccf543311e0d254ad",
+    "source_hash": "0c19af926520c320bc567338c48427922cc3441ba696adee9a616d3e3f26933e",
+    "non_functional_source_hash": "0c0ecf8f4a14aac8a01d3a67ca60924e300dce0007152e512416ed0bd2cdae00",
     "functionalities": [
-        "- Implement a function that implements :PipedriveContactMapping: as a pure function within the integration package.",
-        "- Implement :PipedriveIntegration:'s `fetch(get_stored)` entry point.\n  - The entry point accepts the host's `get_stored` callback; this integration does not need to read already-stored records, so it may ignore the callback.\n  - Read :PipedriveCredentials: from environment variables. If any required variable is missing or empty, raise `RuntimeError` with a message naming the missing environment variable key (e.g. `PIPEDRIVE_API_TOKEN`).\n  - Request the first page of persons from the persons list endpoint of :PipedriveRestAPI: with its pinned page size and the `api_token` query parameter, against the company host derived from `PIPEDRIVE_COMPANY_DOMAIN`.\n  - Read every subsequent page per the pagination envelope of :PipedriveRestAPI: until all pages are read.\n  - For each record across all pages, map it with :PipedriveContactMapping: to a :Contact: data dict.\n  - Return the list of mapped :Contact: data dicts; the host stores them verbatim.",
-        "- Wire :PipedriveIntegration: into the host's runtime discovery surface.\n  - `src/integrations/pipedrive/__init__.py` exposes the module-level `DATA_TYPE` set to `contact` and the top-level callable `fetch` as the package's public entry point.\n    - The package's public API is declared as exactly `DATA_TYPE` and `fetch`, for example through `__all__`.\n    - Internal helper modules (such as a mapping module) are implementation details; `__init__.py` may import them, and they need not be removed from the package namespace."
+        "- :PipedriveContactMapping: maps one `ContactRecord` of :PipedriveRestAPI: to a :Contact:.",
+        "- :PipedriveIntegration: exposes a `fetch(get_stored)` entry point.\n  - It reads the following required environment variables:\n    - `PIPEDRIVE_API_TOKEN`\n    - `PIPEDRIVE_COMPANY_DOMAIN` - the account's company subdomain, such as `acme` for `https://acme.pipedrive.com`\n  - It raises `RuntimeError` naming any environment variable key that is missing or empty.\n  - It follows :PipedriveRestAPI: to authenticate, read every page of persons, map every record with :PipedriveContactMapping:, and return the mapped :Contact: data dicts.",
+        "- :PipedriveIntegration: exports `fetch(get_stored)` from `__init__.py`."
     ]
 }

@@ -1,61 +1,69 @@
+import logging
 from typing import Any, Dict, List, Optional
 
-def get_field_value(fields: Dict[str, Any], key: str) -> Optional[str]:
+logger = logging.getLogger(__name__)
+
+def _get_field_value(fields: Dict[str, List[Dict[str, Any]]], key: str) -> Optional[str]:
     """
-    Helper to extract the 'value' of the FIRST entry in a Nimble field array.
-    Returns None if the key is missing, array is empty, or value is null/empty.
+    Extracts the 'value' of the FIRST entry in a field's array per contract.
+    Treats as missing if key is absent, array empty, or value is empty/null.
     """
     entries = fields.get(key)
     if not entries or not isinstance(entries, list) or len(entries) == 0:
         return None
     
-    val = entries[0].get("value")
+    first_entry = entries[0]
+    if not isinstance(first_entry, dict):
+        return None
+        
+    val = first_entry.get("value")
     if val is None:
         return None
-    
+        
     trimmed = str(val).strip()
-    return trimmed if trimmed else None
+    return trimmed if trimmed != "" else None
 
-def map_contact(raw: Dict[str, Any]) -> Dict[str, Any]:
+def map_contact(source: Dict[str, Any]) -> Dict[str, Any]:
     """
-    Implements the Nimble Contact -> contact-data mapping contract.
-    Ref: resources/nimble/contact-mapping.md
+    Maps a Nimble ContactRecord to a host Contact shape.
+    Follows [resource]resources/nimble/contact-mapping.md strictly.
     """
-    fields = raw.get("fields", {})
+    fields = source.get("fields", {})
     
-    # 1. Basic Fields
-    external_id = raw.get("id")
-    job_title = get_field_value(fields, "title")
-    company_name = get_field_value(fields, "company")
+    # 1. External ID
+    external_id = source.get("id")
     
-    # 2. Email (Lowercased and trimmed)
-    email_val = get_field_value(fields, "email")
-    primary_email = email_val.lower() if email_val else None
-    
-    # 3. Full Name Derivation
-    first_name = get_field_value(fields, "first name")
-    last_name = get_field_value(fields, "last name")
-    
+    # 2. Extract specific fields for logic
+    first_name = _get_field_value(fields, "first name")
+    last_name = _get_field_value(fields, "last name")
+    email = _get_field_value(fields, "email")
+    company = _get_field_value(fields, "company")
+    title = _get_field_value(fields, "title")
+
+    # 3. full_name derivation
     full_name = ""
-    # Rule 1: First + Last
-    name_parts = []
-    if first_name: name_parts.append(first_name)
-    if last_name: name_parts.append(last_name)
-    
-    if name_parts:
-        full_name = " ".join(name_parts)
+    # Rule 1: First + Last joined by space (stripped)
+    if first_name or last_name:
+        parts = []
+        if first_name: parts.append(first_name)
+        if last_name: parts.append(last_name)
+        full_name = " ".join(parts).strip()
     
     # Rule 2: Email fallback
-    if not full_name and email_val:
-        full_name = email_val
-        
-    # Rule 3: Company fallback
-    if not full_name and company_name:
-        full_name = company_name
+    if not full_name and email:
+        full_name = email
     
-    # 4. Custom Fields
+    # Rule 3: Company fallback
+    if not full_name and company:
+        full_name = company
+        
+    # 4. primary_email (lowercased and trimmed)
+    primary_email = email.lower() if email else None
+
+    # 5. custom_fields
+    # Captures record_type, excludes business fields used above and raw fields map/id.
     custom_fields = {}
-    record_type = raw.get("record_type")
+    record_type = source.get("record_type")
     if record_type is not None:
         custom_fields["record_type"] = record_type
 
@@ -64,7 +72,7 @@ def map_contact(raw: Dict[str, Any]) -> Dict[str, Any]:
         "external_id": external_id,
         "full_name": full_name,
         "primary_email": primary_email,
-        "job_title": job_title,
-        "company_name": company_name,
+        "job_title": title,
+        "company_name": company,
         "custom_fields": custom_fields
     }

@@ -1,9 +1,9 @@
 {
-    "source_hash": "d4f46e8219446ceb244bcf08bbdfbac50dae77ed245dab92b33e56deeafba616",
-    "non_functional_source_hash": "7cc5d6692b23ace01b53dc9e3c382b613d8ba3be7d1ebbffd16c3bb04fc64809",
+    "source_hash": "e5d514ab2dd2df3f322eaffd34822f01dce64005b3bea37ed918f26779debdcd",
+    "non_functional_source_hash": "1a8e78da5f4b6c72a6507dc500fcd010cfc48a098a62e3ca5adb05e2f8ce6d7a",
     "functionalities": [
-        "- Implement a function that implements :DynamicsContactMapping: as a pure function within the integration package.",
-        "- Implement :DynamicsIntegration:'s `fetch(get_stored)` entry point.\n  - The entry point accepts the host's `get_stored` callback; this integration does not need to read already-stored records, so it may ignore the callback.\n  - Read :DynamicsCredentials: from environment variables. If any required variable is missing or empty, raise `RuntimeError` with a message naming the missing environment variable key (e.g. `DYNAMICS_ENDPOINT`).\n  - Acquire a bearer token via the OAuth client-credentials flow of :DynamicsRestAPI:, using the org base URL plus `/.default` as the scope.\n  - Request the first page of contacts from the query endpoint of :DynamicsRestAPI: with its pinned query options and headers.\n  - Read every subsequent page per the pagination envelope of :DynamicsRestAPI: until all pages are read.\n  - For each record across all pages, map it with :DynamicsContactMapping: to a :Contact: data dict.\n  - Return the list of mapped :Contact: data dicts; the host stores them verbatim.",
-        "- Wire :DynamicsIntegration: into the host's runtime discovery surface.\n  - `src/integrations/dynamics/__init__.py` exposes the module-level `DATA_TYPE` set to `contact` and the top-level callable `fetch` as the package's public entry point.\n    - The package's public API is declared as exactly `DATA_TYPE` and `fetch`, for example through `__all__`.\n    - Internal helper modules (such as a mapping module) are implementation details; `__init__.py` may import them, and they need not be removed from the package namespace."
+        "- :DynamicsContactMapping: maps one `ContactRecord` of :DynamicsRestAPI: to a :Contact:.",
+        "- :DynamicsIntegration: exposes a `fetch(get_stored)` entry point.\n  - It reads the following required environment variables:\n    - `DYNAMICS_ENDPOINT` - the Dataverse organization base URL, such as `https://your-org.crm4.dynamics.com`\n    - `DYNAMICS_TENANT_ID` - the Microsoft Entra tenant identifier for the Dataverse organization\n    - `DYNAMICS_CLIENT_ID`\n    - `DYNAMICS_CLIENT_SECRET`\n  - It raises `RuntimeError` naming any environment variable key that is missing or empty.\n  - It follows :DynamicsRestAPI: to authenticate, read every page of contacts, map every record with :DynamicsContactMapping:, and return the mapped :Contact: data dicts.",
+        "- :DynamicsIntegration: exports `fetch(get_stored)` from `__init__.py`."
     ]
 }

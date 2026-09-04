@@ -1,66 +1,72 @@
 from typing import Any, Dict
 
-def map_contact(raw: Dict[str, Any]) -> Dict[str, Any]:
+def map_contact(source: Dict[str, Any]) -> Dict[str, Any]:
     """
-    Implements ZendeskSellContactMapping.
-    Converts a raw Zendesk Sell Contact record (unwrapped 'data' object) 
-    into a host-standard Contact data dict.
+    Pure mapping function for Zendesk Sell ContactRecord -> conventional contact shape.
+    Follows [resource]resources/zendesk_sell/contact-mapping.md.
     """
-    # 1. external_id derivation
-    raw_id = raw.get("id")
+    
+    # external_id: id rendered as string, or None if missing/empty
+    raw_id = source.get("id")
     external_id = str(raw_id) if raw_id is not None and str(raw_id).strip() != "" else None
 
-    # 2. full_name derivation
-    is_org = raw.get("is_organization") is True
-    full_name = ""
+    is_org = source.get("is_organization") is True
     
-    name_val = (raw.get("name") or "").strip()
-    first_name = (raw.get("first_name") or "").strip()
-    last_name = (raw.get("last_name") or "").strip()
-    email_val = (raw.get("email") or "").strip()
+    # Values used for name derivation and fields
+    name_val = (source.get("name") or "").strip()
+    first_name = (source.get("first_name") or "").strip()
+    last_name = (source.get("last_name") or "").strip()
+    email_val = (source.get("email") or "").strip()
 
+    # full_name derivation logic
+    full_name = ""
     if is_org:
         if name_val:
             full_name = name_val
     else:
-        # Person logic
-        joined_name = f"{first_name} {last_name}".strip()
-        if joined_name:
-            full_name = joined_name
+        # Person logic: join first and last name
+        joined = f"{first_name} {last_name}".strip()
+        if joined:
+            full_name = joined
         elif name_val:
             full_name = name_val
         elif email_val:
             full_name = email_val
 
-    # 3. primary_email
-    email_raw = raw.get("email")
-    primary_email = email_raw.lower().strip() if email_raw and email_raw.strip() else None
+    # primary_email: email lowercased and trimmed
+    primary_email = email_val.lower() if email_val else None
 
-    # 4. company_name
-    org_name = raw.get("organization_name")
-    company_name = org_name.strip() if org_name and org_name.strip() else None
+    # company_name: organization_name trimmed
+    org_name = (source.get("organization_name") or "").strip()
+    company_name = org_name if org_name else None
 
-    # 5. custom_fields
-    # Starts from existing custom_fields
-    cf_source = raw.get("custom_fields") or {}
-    custom_fields = {k: v for k, v in cf_source.items() if v is not None}
-    
-    # Add provenance fields
+    # job_title: title trimmed
+    title = (source.get("title") or "").strip()
+    job_title = title if title else None
+
+    # custom_fields: include source custom fields and provenance
+    out_custom = {}
+    source_custom = source.get("custom_fields")
+    if isinstance(source_custom, dict):
+        for k, v in source_custom.items():
+            if v is not None:
+                out_custom[k] = v
+
     provenance_keys = [
         "created_at", "updated_at", "contact_id", 
         "parent_organization_id", "is_organization"
     ]
     for pk in provenance_keys:
-        val = raw.get(pk)
+        val = source.get(pk)
         if val is not None:
-            custom_fields[pk] = val
+            out_custom[pk] = val
 
     return {
         "provider_id": "zendesk_sell",
         "external_id": external_id,
         "full_name": full_name,
         "primary_email": primary_email,
-        "job_title": raw.get("title") if raw.get("title") else None,
+        "job_title": job_title,
         "company_name": company_name,
-        "custom_fields": custom_fields
+        "custom_fields": out_custom
     }

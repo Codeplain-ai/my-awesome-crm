@@ -1,29 +1,44 @@
+import logging
+import os
 from typing import Any, Callable, List, Dict
+
 from .client import ZendeskSellClient
 from .mapping import map_contact
 
-__all__ = ["fetch", "DATA_TYPE"]
+logger = logging.getLogger(__name__)
 
-# The data type this integration primarily produces.
+# Integration Provider ID
 DATA_TYPE = "contact"
 
 def fetch(get_stored: Callable[[str], List[Dict[str, Any]]]) -> List[Dict[str, Any]]:
     """
-    Integration entry point for Zendesk Sell.
-    Fetches all contacts from the Zendesk Sell API and maps them to the host's Contact format.
+    Zendesk Sell integration entry point.
+    Fetches all contacts and maps them to the host shape.
     """
-    client = ZendeskSellClient()
-    mapped_records = []
+    token = os.environ.get("ZENDESK_SELL_ACCESS_TOKEN")
+    if not token:
+        raise RuntimeError("Missing required environment variable: ZENDESK_SELL_ACCESS_TOKEN")
 
-    # The integration lists both persons and organizations (no filter).
-    for raw_item in client.list_all_contacts():
-        # The business contact lives under the 'data' object of each item.
-        raw_contact = raw_item.get("data", {})
-        mapped_data = map_contact(raw_contact)
-        
-        mapped_records.append({
-            "data_type": DATA_TYPE,
-            "data": mapped_data
-        })
+    client = ZendeskSellClient(token=token)
+    results: List[Dict[str, Any]] = []
 
-    return mapped_records
+    try:
+        for raw_contact in client.list_all_contacts():
+            ext_id = raw_contact.get("id")
+            try:
+                mapped = map_contact(raw_contact)
+                results.append({
+                    "data_type": "contact",
+                    "data": mapped
+                })
+            except ValueError as ve:
+                # Skip-and-log policy: skip individual records that fail mapping
+                logger.warning(
+                    f"Skipping record {ext_id} due to mapping error: {str(ve)}",
+                    extra={"external_id": ext_id, "provider": "zendesk_sell"}
+                )
+    except Exception as e:
+        logger.error(f"Zendesk Sell fetch operation failed: {str(e)}", exc_info=True)
+        raise RuntimeError(f"Integration 'zendesk_sell' failed: {str(e)}")
+
+    return results

@@ -1,85 +1,64 @@
 import pytest
-from unittest.mock import patch, MagicMock
-from src.integrations.dynamics import fetch, DATA_TYPE
-
-def test_integration_exports():
-    """Verify the integration exports the expected public API for discovery."""
-    import src.integrations.dynamics as dynamics
-    assert hasattr(dynamics, "fetch")
-    assert callable(dynamics.fetch)
-    assert hasattr(dynamics, "DATA_TYPE")
-    assert dynamics.DATA_TYPE == "contact"
-    if hasattr(dynamics, "__all__"):
-        assert "fetch" in dynamics.__all__
-        assert "DATA_TYPE" in dynamics.__all__
+import os
+from unittest.mock import MagicMock, patch
+from src.integrations.dynamics import fetch
 
 @patch("src.integrations.dynamics.DynamicsClient")
-def test_fetch_orchestration(mock_client_class):
-    mock_instance = mock_client_class.return_value
-    mock_instance.list_contacts.return_value = [
-        {"contactid": "c1", "fullname": "One"},
-        {"contactid": "c2", "fullname": "Two"}
-    ]
+@patch.dict(os.environ, {
+    "DYNAMICS_CLIENT_ID": "test-cid",
+    "DYNAMICS_CLIENT_SECRET": "test-sec",
+    "DYNAMICS_TENANT_ID": "test-tid",
+    "DYNAMICS_ENDPOINT": "https://test.crm.dynamics.com"
+})
+def test_fetch_multi_page_pagination(mock_client_class):
+    # Setup mock client to return two pages
+    mock_client = mock_client_class.return_value
+    mock_client.list_contacts.return_value = iter([
+        [{"contactid": "1", "fullname": "User One"}],
+        [{"contactid": "2", "fullname": "User Two"}]
+    ])
     
-    def get_stored(t): return []
+    # Mock get_stored callback (not used in this logic but required by contract)
+    get_stored = MagicMock(return_value=[])
     
     results = fetch(get_stored)
     
     assert len(results) == 2
-    assert results[0]["data_type"] == "contact"
-    assert results[0]["data"]["external_id"] == "c1"
-    assert results[1]["data"]["external_id"] == "c2"
+    assert results[0]["data"]["external_id"] == "1"
+    assert results[1]["data"]["external_id"] == "2"
+    assert all(r["data_type"] == "contact" for r in results)
 
-@patch("src.integrations.dynamics.client.httpx.Client")
-def test_client_pagination(mock_client_class):
-    from src.integrations.dynamics.client import DynamicsClient
-    import os
+@patch.dict(os.environ, {}, clear=True)
+def test_fetch_missing_env_vars_raises_runtime_error():
+    with pytest.raises(RuntimeError) as exc:
+        fetch(lambda x: [])
+    assert "Missing required environment variables" in str(exc.value)
+    assert "DYNAMICS_ENDPOINT" in str(exc.value)
 
-    # Setup env
-    with patch.dict(os.environ, {
-        "DYNAMICS_ENDPOINT": "https://test.crm.com",
-        "DYNAMICS_TENANT_ID": "t1",
-        "DYNAMICS_CLIENT_ID": "c1",
-        "DYNAMICS_CLIENT_SECRET": "s1"
-    }):
-        mock_client = MagicMock()
-        mock_client_class.return_value.__enter__.return_value = mock_client
+@patch("src.integrations.dynamics.DynamicsClient")
+@patch.dict(os.environ, {
+    "DYNAMICS_CLIENT_ID": "cid",
+    "DYNAMICS_CLIENT_SECRET": "sec",
+    "DYNAMICS_TENANT_ID": "tid",
+    "DYNAMICS_ENDPOINT": "https://test.crm.dynamics.com"
+})
+def test_fetch_skip_and_log_policy(mock_client_class):
+    mock_client = mock_client_class.return_value
+    mock_client.list_contacts.return_value = iter([
+        [{"contactid": "good", "fullname": "Good"}, {"contactid": "bad", "fullname": "Bad"}]
+    ])
+    
+    # Inject a side effect into the mapping call
+    with patch("src.integrations.dynamics.map_contact_record") as mock_map:
+        def side_effect(rec):
+            if rec["contactid"] == "bad":
+                raise ValueError("Simulated mapping error")
+            return {"external_id": rec["contactid"]}
         
-        # Mock Token response
-        mock_token_resp = MagicMock()
-        mock_token_resp.status_code = 200
-        mock_token_resp.json.return_value = {"access_token": "abc"}
+        mock_map.side_effect = side_effect
         
-        # Mock Page 1
-        mock_p1_resp = MagicMock()
-        mock_p1_resp.status_code = 200
-        mock_p1_resp.json.return_value = {
-            "value": [{"contactid": "1"}],
-            "@odata.nextLink": "https://test.crm.com/api/page2"
-        }
+        results = fetch(lambda x: [])
         
-        # Mock Page 2
-        mock_p2_resp = MagicMock()
-        mock_p2_resp.status_code = 200
-        mock_p2_resp.json.return_value = {
-            "value": [{"contactid": "2"}]
-        }
-        
-        mock_client.post.return_value = mock_token_resp
-        mock_client.get.side_effect = [mock_p1_resp, mock_p2_resp]
-        
-        client = DynamicsClient()
-        records = client.list_contacts()
-        
-        assert len(records) == 2
-        assert records[0]["contactid"] == "1"
-        assert records[1]["contactid"] == "2"
-        assert mock_client.get.call_count == 2
-
-def test_missing_env_vars():
-    from src.integrations.dynamics.client import DynamicsClient
-    import os
-    with patch.dict(os.environ, clear=True):
-        with pytest.raises(RuntimeError) as exc:
-            DynamicsClient()
-        assert "DYNAMICS_ENDPOINT" in str(exc.value)
+        # Batch policy: 1 record mapped, 1 record skipped
+        assert len(results) == 1
+        assert results[0]["data"]["external_id"] == "good"

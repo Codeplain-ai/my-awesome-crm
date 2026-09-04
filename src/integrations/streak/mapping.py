@@ -1,54 +1,35 @@
-import logging
-from typing import Any
+from typing import Any, Dict, List, Optional
 
-logger = logging.getLogger(__name__)
-
-def map_streak_contact(streak_record: dict[str, Any]) -> dict[str, Any]:
+def map_contact(record: Dict[str, Any]) -> Dict[str, Any]:
     """
-    Implements :StreakContactMapping: as a pure function.
-    Transforms a Streak ContactRecord into a host-standard Contact data dict.
+    Maps a Streak ContactRecord to the conventional Contact shape.
+    Follows [resource]resources/streak/contact-mapping.md.
     """
-    # 1. external_id
-    external_id = streak_record.get("key")
+    # external_id mapping
+    external_id = record.get("key")
 
-    # 2. full_name derivation
-    full_name = ""
-    raw_full_name = streak_record.get("fullName")
-    if raw_full_name and raw_full_name.strip():
-        full_name = raw_full_name.strip()
-    else:
-        given = (streak_record.get("givenName") or "").strip()
-        family = (streak_record.get("familyName") or "").strip()
-        joined = f"{given} {family}".strip()
-        if joined:
-            full_name = joined
-        else:
-            emails = streak_record.get("emailAddresses")
-            if emails and isinstance(emails, list):
-                for e in emails:
-                    if e and e.strip():
-                        full_name = e.strip()
-                        break
+    # full_name derivation
+    full_name = _derive_full_name(record)
 
-    # 3. primary_email
+    # primary_email derivation
+    emails = record.get("emailAddresses", [])
     primary_email = None
-    emails = streak_record.get("emailAddresses")
-    if emails and isinstance(emails, list):
-        for e in emails:
-            if e and e.strip():
-                primary_email = e.strip().lower()
-                break
+    if isinstance(emails, list) and len(emails) > 0:
+        first_email = emails[0]
+        if first_email:
+            primary_email = str(first_email).strip().lower()
 
-    # 4. job_title
-    job_title = streak_record.get("title")
-    if job_title == "":
+    # job_title
+    job_title = record.get("title")
+    if not job_title: # handles empty string or None
         job_title = None
 
-    # 5. custom_fields (provenance fields)
+    # custom_fields
     custom_fields = {}
-    for ts_key in ["creationTimestamp", "lastSavedTimestamp"]:
-        if ts_key in streak_record and streak_record[ts_key] is not None:
-            custom_fields[ts_key] = streak_record[ts_key]
+    if "creationTimestamp" in record and record["creationTimestamp"] is not None:
+        custom_fields["creationTimestamp"] = record["creationTimestamp"]
+    if "lastSavedTimestamp" in record and record["lastSavedTimestamp"] is not None:
+        custom_fields["lastSavedTimestamp"] = record["lastSavedTimestamp"]
 
     return {
         "provider_id": "streak",
@@ -57,5 +38,28 @@ def map_streak_contact(streak_record: dict[str, Any]) -> dict[str, Any]:
         "primary_email": primary_email,
         "job_title": job_title,
         "company_name": None,
-        "custom_fields": custom_fields,
+        "custom_fields": custom_fields
     }
+
+def _derive_full_name(record: Dict[str, Any]) -> str:
+    # 1. fullName
+    fn = record.get("fullName")
+    if fn and str(fn).strip():
+        return str(fn).strip()
+    
+    # 2. givenName + familyName
+    gn = record.get("givenName") or ""
+    fam = record.get("familyName") or ""
+    joined = f"{gn} {fam}".strip()
+    if joined:
+        return joined
+    
+    # 3. First email address
+    emails = record.get("emailAddresses", [])
+    if isinstance(emails, list) and len(emails) > 0:
+        first_email = emails[0]
+        if first_email and str(first_email).strip():
+            return str(first_email).strip()
+            
+    # 4. Fallback
+    return ""

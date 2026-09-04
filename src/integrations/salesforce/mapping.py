@@ -1,51 +1,46 @@
-from typing import Any, Dict, Optional
+from typing import Any
 
-def map_contact(record: Dict[str, Any]) -> Dict[str, Any]:
+def map_contact_record(record: dict[str, Any]) -> dict[str, Any]:
     """
-    Pure transformation from Salesforce ContactRecord to conventional Contact shape.
-    Following: [resource]resources/salesforce/contact-mapping.md
+    Maps a Salesforce Contact record to the host's conventional contact shape.
+    Implementation of [resource]resources/salesforce/contact-mapping.md
     """
-    
-    # 1. external_id
+    # provider_id: Always 'salesforce'
+    # external_id: record Id
     external_id = record.get("Id")
-    
-    # 2. full_name derivation
-    full_name = ""
-    sf_name = record.get("Name")
-    if sf_name and isinstance(sf_name, str):
-        full_name = sf_name.strip()
-    else:
-        first_name = record.get("FirstName") or ""
-        last_name = record.get("LastName") or ""
-        full_name = f"{first_name} {last_name}".strip()
-    
-    # 3. primary_email
-    primary_email = record.get("Email")
-    if primary_email:
-        primary_email = primary_email.strip().lower()
-    else:
-        primary_email = None
-        
-    # 4. job_title
-    job_title = record.get("Title")
-    if not job_title or job_title == "":
-        job_title = None
-        
-    # 5. company_name (Account.Name)
-    company_name = None
-    account = record.get("Account")
-    if isinstance(account, dict):
-        acc_name = account.get("Name")
-        if acc_name and acc_name != "":
-            company_name = acc_name
 
-    # 6. custom_fields
-    # Consumed: Id, Name, FirstName, LastName, Email, Title, Account, attributes
+    # full_name derivation
+    name_field = record.get("Name")
+    if name_field:
+        full_name = name_field.strip()
+    else:
+        first = (record.get("FirstName") or "").strip()
+        last = (record.get("LastName") or "").strip()
+        full_name = f"{first} {last}".strip()
+
+    # primary_email
+    email_val = record.get("Email")
+    primary_email = email_val.strip().lower() if email_val else None
+
+    # job_title
+    job_title = record.get("Title") or None
+
+    # company_name
+    account = record.get("Account")
+    company_name = None
+    if isinstance(account, dict):
+        company_name = account.get("Name") or None
+
+    # custom_fields rules: filter out consumed keys and attributes metadata
     consumed_keys = {"Id", "Name", "FirstName", "LastName", "Email", "Title", "Account", "attributes"}
-    custom_fields = {
-        k: v for k, v in record.items() 
-        if k not in consumed_keys and k != "attributes"
-    }
+    custom_fields = {}
+    for k, v in record.items():
+        if k in consumed_keys:
+            continue
+        # Ensure we don't copy nested attributes or nulls if they were metadata
+        if k == "attributes":
+            continue
+        custom_fields[k] = v
 
     return {
         "provider_id": "salesforce",

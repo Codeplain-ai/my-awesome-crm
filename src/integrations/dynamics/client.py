@@ -1,88 +1,65 @@
-import os
 import httpx
-from typing import Any, List, Optional
+from typing import Any, Dict, Generator, List, Optional
 
 class DynamicsClient:
     """
-    HTTP client for Dynamics 365 (Dataverse) Web API.
-    Handles OAuth2 authentication and paginated contact retrieval.
+    Client for Dynamics 365 / Dataverse API using httpx.
+    Follows the surface defined in resources/dynamics/openapi.yaml.
     """
-
-    def __init__(self):
-        self.endpoint = os.environ.get("DYNAMICS_ENDPOINT")
-        self.tenant_id = os.environ.get("DYNAMICS_TENANT_ID")
-        self.client_id = os.environ.get("DYNAMICS_CLIENT_ID")
-        self.client_secret = os.environ.get("DYNAMICS_CLIENT_SECRET")
-
-        for key, val in [
-            ("DYNAMICS_ENDPOINT", self.endpoint),
-            ("DYNAMICS_TENANT_ID", self.tenant_id),
-            ("DYNAMICS_CLIENT_ID", self.client_id),
-            ("DYNAMICS_CLIENT_SECRET", self.client_secret),
-        ]:
-            if not val:
-                raise RuntimeError(f"Missing environment variable: {key}")
-
-        self.endpoint = self.endpoint.rstrip("/")
+    def __init__(self, client_id: str, client_secret: str, tenant_id: str, endpoint: str):
+        self.client_id = client_id
+        self.client_secret = client_secret
+        self.tenant_id = tenant_id
+        self.endpoint = endpoint
+        self.access_token: Optional[str] = None
 
     def _get_token(self) -> str:
-        """Acquires a bearer token via client_credentials flow."""
+        """Azure AD OAuth 2.0 client-credentials token request."""
         url = f"https://login.microsoftonline.com/{self.tenant_id}/oauth2/v2.0/token"
-        scope = f"{self.endpoint}/.default"
-        
-        payload = {
+        data = {
             "grant_type": "client_credentials",
             "client_id": self.client_id,
             "client_secret": self.client_secret,
-            "scope": scope,
+            "scope": f"{self.endpoint}/.default"
         }
-        
-        with httpx.Client() as client:
-            resp = client.post(url, data=payload)
-            if resp.status_code != 200:
-                raise RuntimeError(f"Failed to acquire Dynamics token: {resp.status_code} {resp.text}")
-            return resp.json()["access_token"]
+        response = httpx.post(url, data=data, timeout=30.0)
+        if response.status_code != 200:
+            raise RuntimeError(f"Auth failed: {response.status_code} {response.text}")
+        return response.json()["access_token"]
 
-    def list_contacts(self) -> List[dict[str, Any]]:
-        """Fetches all contacts, following @odata.nextLink pagination."""
-        token = self._get_token()
-        headers = {
-            "Authorization": f"Bearer {token}",
-            "Accept": "application/json",
-            "OData-MaxVersion": "4.0",
-            "OData-Version": "4.0",
-        }
+    def list_contacts(self) -> Generator[List[Dict[str, Any]], None, None]:
+        """Queries contacts with pagination support."""
+        if not self.access_token:
+            self.access_token = self._get_token()
 
-        # Initial query parameters as defined in openapi.yaml
+        # OData projection and expansion as per resources/dynamics/openapi.yaml
         params = {
             "$select": "contactid,fullname,firstname,lastname,emailaddress1,jobtitle",
-            "$expand": "parentcustomerid_account($select=name)",
+            "$expand": "parentcustomerid_account($select=name)"
         }
-
+        headers = {
+            "Authorization": f"Bearer {self.access_token}",
+            "Accept": "application/json",
+            "OData-MaxVersion": "4.0",
+            "OData-Version": "4.0"
+        }
+        
         url = f"{self.endpoint}/api/data/v9.2/contacts"
-        all_records = []
-
-        try:
-            with httpx.Client(headers=headers, timeout=30.0) as client:
-                while url:
-                    # On subsequent pages, nextLink is absolute and contains its own params
-                    request_params = params if "?" not in url else None
-                    resp = client.get(url, params=request_params)
-
-                    if resp.status_code != 200:
-                        raise RuntimeError(
-                            f"Dynamics API request failed with status {resp.status_code}: {resp.text}"
-                        )
-
-                    data = resp.json()
-                    page_values = data.get("value")
-                    if not isinstance(page_values, list):
-                        raise RuntimeError(f"Unexpected API response format: 'value' key missing or not a list. Body: {resp.text}")
-
-                    all_records.extend(page_values)
-                    # Pagination: follow @odata.nextLink verbatim if present
-                    url = data.get("@odata.nextLink")
-        except httpx.RequestError as exc:
-            raise RuntimeError(f"Transport error while querying Dynamics at {exc.request.url!r}: {exc}")
-
-        return all_records
+        
+        is_first_page = True
+        while url:
+            # Note: @odata.nextLink is an absolute URL. Params are only used on the first call.
+            response = httpx.get(
+                url, 
+                params=params if is_first_page else None, 
+                headers=headers,
+                timeout=60.0
+            )
+            response.raise_for_status()
+            is_first_page = False
+            
+            data = response.json()
+            yield data.get("value", [])
+            
+            # Stop when @odata.nextLink is absent
+            url = data.get("@odata.nextLink")

@@ -1,53 +1,51 @@
 import pytest
-from unittest.mock import patch, MagicMock
+from unittest.mock import MagicMock, patch
 from src.integrations.zendesk_sell import fetch
 
-@patch("src.integrations.zendesk_sell.client.ZendeskSellClient.list_all_contacts")
-@patch.dict("os.environ", {"ZENDESK_SELL_ACCESS_TOKEN": "fake_token"})
-def test_fetch_success(mock_list):
-    # Setup mock data for two items
-    mock_list.return_value = iter([
-        {"data": {"id": 1, "name": "Org 1", "is_organization": True}},
-        {"data": {"id": 2, "first_name": "John", "last_name": "Smith"}}
-    ])
+@patch("src.integrations.zendesk_sell.client.httpx.Client")
+def test_fetch_with_pagination(MockHttpx, monkeypatch):
+    monkeypatch.setenv("ZENDESK_SELL_ACCESS_TOKEN", "valid-token")
     
+    # Mock Page 1
+    resp1 = MagicMock()
+    resp1.status_code = 200
+    resp1.json.return_value = {
+        "items": [{"data": {"id": 1, "name": "Contact 1"}}],
+        "meta": {"links": {"next_page": "https://api.getbase.com/v2/contacts?page=2"}}
+    }
+    
+    # Mock Page 2 (Final)
+    resp2 = MagicMock()
+    resp2.status_code = 200
+    resp2.json.return_value = {
+        "items": [{"data": {"id": 2, "name": "Contact 2"}}],
+        "meta": {"links": {}}
+    }
+    
+    MockHttpx.return_value.__enter__.return_value.get.side_effect = [resp1, resp2]
+    
+    # Verify get_stored callback functionality (even if not used for filtering in this impl)
     get_stored = MagicMock(return_value=[])
     results = fetch(get_stored)
     
     assert len(results) == 2
-    assert all(r["data_type"] == "contact" for r in results)
+    get_stored.assert_not_called() # Zendesk Sell impl doesn't currently use get_stored for delta sync
     assert results[0]["data"]["external_id"] == "1"
-    assert results[1]["data"]["full_name"] == "John Smith"
+    assert results[1]["data"]["external_id"] == "2"
 
-@patch.dict("os.environ", {}, clear=True)
-def test_fetch_missing_credentials():
-    get_stored = MagicMock()
-    with pytest.raises(RuntimeError) as excinfo:
-        fetch(get_stored)
-    assert "ZENDESK_SELL_ACCESS_TOKEN" in str(excinfo.value)
+def test_fetch_missing_token(monkeypatch):
+    monkeypatch.setenv("ZENDESK_SELL_ACCESS_TOKEN", "")
+    with pytest.raises(RuntimeError, match="ZENDESK_SELL_ACCESS_TOKEN"):
+        fetch(lambda x: [])
 
-@patch("httpx.Client.get")
-@patch.dict("os.environ", {"ZENDESK_SELL_ACCESS_TOKEN": "fake_token"})
-def test_fetch_pagination(mock_get):
-    # Mock first page response
-    page1 = {
-        "items": [{"data": {"id": 101, "name": "P1"}}],
-        "meta": {"links": {"next_page": "https://api.getbase.com/v2/contacts?page=2"}}
-    }
-    # Mock second page response
-    page2 = {
-        "items": [{"data": {"id": 102, "name": "P2"}}],
-        "meta": {"links": {}} # No next_page
-    }
+@patch("src.integrations.zendesk_sell.client.httpx.Client")
+def test_fetch_api_error(MockHttpx, monkeypatch):
+    monkeypatch.setenv("ZENDESK_SELL_ACCESS_TOKEN", "token")
     
-    mock_get.side_effect = [
-        MagicMock(status_code=200, json=lambda: page1, raise_for_status=lambda: None),
-        MagicMock(status_code=200, json=lambda: page2, raise_for_status=lambda: None),
-    ]
+    resp = MagicMock()
+    resp.status_code = 401
+    resp.text = "Unauthorized"
+    MockHttpx.return_value.__enter__.return_value.get.return_value = resp
     
-    from src.integrations.zendesk_sell import fetch
-    results = fetch(lambda t: [])
-    
-    assert len(results) == 2
-    assert results[0]["data"]["external_id"] == "101"
-    assert results[1]["data"]["external_id"] == "102"
+    with pytest.raises(RuntimeError, match="401 Unauthorized"):
+        fetch(lambda x: [])

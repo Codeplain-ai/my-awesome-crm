@@ -1,6 +1,6 @@
-import os
 import logging
-from typing import Any, Callable, List
+import os
+from typing import Any, Callable, Dict, List, Optional
 
 import httpx
 
@@ -8,28 +8,34 @@ from .mapping import map_copper_person_to_contact
 
 logger = logging.getLogger(__name__)
 
-# Integration Metadata
+# The Provider identifier
+SOURCE = "copper"
+# Default data type for this integration
 DATA_TYPE = "contact"
-BASE_URL = "https://api.copper.com/developer_api/v1"
 
-__all__ = ["DATA_TYPE", "fetch"]
-
-
-def fetch(get_stored: Callable[[str], List[dict[str, Any]]]) -> List[dict[str, Any]]:
+def fetch(get_stored: Callable[[str], List[Dict[str, Any]]]) -> List[Dict[str, Any]]:
     """
-    Copper integration fetch entry point.
+    Fetches people from Copper and maps them to the host's contact format.
     
-    Reads credentials from COPPER_API_KEY and COPPER_USER_EMAIL.
-    Walks the Copper People search API pages and maps results to host records.
+    Args:
+        get_stored: A callback to retrieve existing records (unused by this integration 
+                    as it relies on host-side upsert logic).
     """
     api_key = os.environ.get("COPPER_API_KEY")
     user_email = os.environ.get("COPPER_USER_EMAIL")
 
+    missing = []
     if not api_key:
-        raise RuntimeError("Missing required Copper credential: COPPER_API_KEY")
+        missing.append("COPPER_API_KEY")
     if not user_email:
-        raise RuntimeError("Missing required Copper credential: COPPER_USER_EMAIL")
+        missing.append("COPPER_USER_EMAIL")
 
+    if missing:
+        error_msg = f"Missing required environment variables: {', '.join(missing)}"
+        logger.error(error_msg)
+        raise RuntimeError(error_msg)
+
+    base_url = "https://api.copper.com/developer_api/v1"
     headers = {
         "X-PW-AccessToken": api_key,
         "X-PW-UserEmail": user_email,
@@ -37,57 +43,61 @@ def fetch(get_stored: Callable[[str], List[dict[str, Any]]]) -> List[dict[str, A
         "Content-Type": "application/json",
     }
 
-    page_size = 200
+    produced_records = []
     page_number = 1
-    all_records = []
+    page_size = 200
 
-    # Use a single client for connection pooling across pages
-    with httpx.Client(timeout=60.0) as client:
+    with httpx.Client(base_url=base_url, headers=headers, timeout=30.0) as client:
         while True:
-            logger.info(f"Fetching Copper People page {page_number}")
+            logger.info(f"Fetching Copper people page {page_number}...")
             
-            try:
-                response = client.post(
-                    f"{BASE_URL}/people/search",
-                    headers=headers,
-                    json={
-                        "page_number": page_number,
-                        "page_size": page_size,
-                    },
-                )
-            except httpx.RequestError as exc:
-                raise RuntimeError(f"Network error while contacting Copper API: {str(exc)}") from exc
-
+            response = client.post(
+                "/people/search",
+                json={"page_number": page_number, "page_size": page_size}
+            )
+            
             if response.status_code != 200:
+                error_detail = response.text
                 try:
-                    error_data = response.json()
-                    message = error_data.get("message", response.text)
+                    error_json = response.json()
+                    error_detail = error_json.get("message", error_detail)
                 except Exception:
-                    message = response.text
+                    pass
                 
-                raise RuntimeError(
-                    f"Copper API error (status {response.status_code}): {message}. "
-                    f"Request: page_number={page_number}"
-                )
+                logger.error(f"Copper API error (status {response.status_code}): {error_detail}")
+                response.raise_for_status()
 
-            batch = response.json()
-            if not isinstance(batch, list):
-                raise RuntimeError(
-                    f"Unexpected Copper API response format: expected list, got {type(batch).__name__}"
-                )
+            records = response.json()
+            if not isinstance(records, list):
+                logger.error(f"Unexpected Copper API response format: expected list, got {type(records)}")
+                break
 
-            for person in batch:
-                mapped_contact = map_copper_person_to_contact(person)
-                all_records.append({
-                    "data_type": DATA_TYPE,
-                    "data": mapped_contact
-                })
+            for raw_record in records:
+                external_id = raw_record.get("id")
+                try:
+                    mapped_data = map_copper_person_to_contact(raw_record)
+                    produced_records.append({
+                        "data_type": DATA_TYPE,
+                        "data": mapped_data
+                    })
+                except ValueError as e:
+                    logger.warning(
+                        f"Skipping Copper record {external_id}: {str(e)}",
+                        extra={"provider_id": SOURCE, "external_id": external_id}
+                    )
+                except Exception as e:
+                    logger.error(
+                        f"Unexpected error mapping Copper record {external_id}: {str(e)}",
+                        exc_info=True
+                    )
+                    # We continue per the skip-and-log policy even for unexpected mapping bugs
+                    continue
 
-            # Pagination check: a page with fewer than page_size records is the final page.
-            if len(batch) < page_size:
-                logger.info(f"Reached end of Copper People data at page {page_number}")
+            # Pagination logic: stop when a page returns fewer than page_size records
+            if len(records) < page_size:
                 break
             
             page_number += 1
 
-    return all_records
+    logger.info(f"Copper integration finished. Total records mapped: {len(produced_records)}")
+    return produced_records

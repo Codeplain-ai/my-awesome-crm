@@ -1,80 +1,63 @@
-import os
 import logging
-from typing import Any, Callable, List
-import httpx
+import os
+from typing import Any, Callable, List, Dict
 
-from .mapping import map_streak_contact
+from .client import StreakClient
+from .mapping import map_contact
 
 logger = logging.getLogger(__name__)
 
-# The data_type this integration primarily produces.
+# Provider identifier
 DATA_TYPE = "contact"
 
-__all__ = ["DATA_TYPE", "fetch"]
-
-
-def fetch(get_stored: Callable[[str], List[dict[str, Any]]]) -> List[dict[str, Any]]:
+def fetch(get_stored: Callable[[str], List[Dict[str, Any]]]) -> List[Dict[str, Any]]:
     """
-    :StreakIntegration: entry point.
-    Pulls Contact records from Streak v2 REST API.
+    Entry point for the Streak integration.
     """
     api_key = os.environ.get("STREAK_API_KEY")
-    if not api_key:
-        raise RuntimeError("Missing STREAK_API_KEY environment variable")
+    if not api_key or api_key.strip() == "":
+        logger.error("STREAK_API_KEY environment variable is missing or empty")
+        raise RuntimeError("Missing STREAK_API_KEY")
 
-    base_url = "https://api.streak.com/api/v2"
-    auth = (api_key, "")
+    client = StreakClient(api_key.strip())
     
-    produced_records = []
+    try:
+        teams = client.list_teams()
+    except Exception as e:
+        logger.error(f"Failed to list teams from Streak: {e}")
+        raise RuntimeError(f"Streak connection failed: {e}")
 
-    with httpx.Client(auth=auth, timeout=30.0) as client:
-        # 1. List Teams (the fan-out axis)
-        try:
-            teams_resp = client.get(f"{base_url}/users/me/teams")
-            teams_resp.raise_for_status()
-            teams = teams_resp.json()
-        except httpx.HTTPStatusError as e:
-            error_msg = f"Streak API HTTP error listing teams: {e.response.status_code} - {e.response.text}"
-            logger.error(error_msg)
-            raise RuntimeError(error_msg)
-        except Exception as e:
-            error_msg = f"Unexpected error listing Streak teams: {str(e)}"
-            logger.error(error_msg, exc_info=True)
-            raise RuntimeError(error_msg)
+    all_produced = []
 
-        if not isinstance(teams, list):
-            error_msg = f"Unexpected Streak teams response format. Expected list, got {type(teams).__name__}: {teams}"
-            logger.error(error_msg)
-            raise RuntimeError(error_msg)
-
-        # 2. List Contacts for each team
-        for team in teams:
-            team_key = team.get("key")
-            if not team_key:
-                continue
+    for team in teams:
+        team_key = team.get("key")
+        if not team_key:
+            continue
             
+        try:
+            raw_contacts = client.list_contacts(team_key)
+        except Exception as e:
+            logger.error(f"Failed to fetch contacts for team {team_key}: {e}")
+            raise RuntimeError(f"Streak API error: {e}")
+
+        for raw_record in raw_contacts:
+            external_id = raw_record.get("key", "unknown")
             try:
-                contacts_resp = client.get(f"{base_url}/teams/{team_key}/contacts")
-                contacts_resp.raise_for_status()
-                streak_contacts = contacts_resp.json()
-            except httpx.HTTPStatusError as e:
-                error_msg = f"Streak API HTTP error for team {team_key}: {e.response.status_code} - {e.response.text}"
-                logger.error(error_msg)
-                raise RuntimeError(error_msg)
-            except Exception as e:
-                error_msg = f"Unexpected error fetching contacts for team {team_key}: {str(e)}"
-                logger.error(error_msg, exc_info=True)
-                raise RuntimeError(error_msg)
-
-            if not isinstance(streak_contacts, list):
-                logger.warning(f"Streak contacts for team {team_key} not a list. Skipping. Type: {type(streak_contacts).__name__}")
-                continue
-
-            for sc in streak_contacts:
-                mapped_data = map_streak_contact(sc)
-                produced_records.append({
+                mapped_data = map_contact(raw_record)
+                all_produced.append({
                     "data_type": "contact",
                     "data": mapped_data
                 })
+            except ValueError as ve:
+                logger.warning(
+                    f"Skipping record {external_id} in Streak integration due to mapping error: {ve}"
+                )
+            except Exception as e:
+                logger.error(
+                    f"Unexpected error mapping record {external_id}: {e}", 
+                    exc_info=True
+                )
+                # We skip unexpected errors as per the skip-and-log batch policy
+                continue
 
-    return produced_records
+    return all_produced

@@ -1,112 +1,75 @@
-from typing import Any
+from typing import Any, Dict
 
+def map_zoho_contact(record: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Implements :ZohoContactMapping: logic based on contact-mapping.md.
+    Maps a Zoho ContactRecord to a host-conventional Contact shape.
+    """
+    # 1. external_id
+    external_id = record.get("id")
 
-def map_contact(raw_record: dict[str, Any]) -> dict[str, Any]:
-    """
-    Maps a Zoho CRM Contact record to a standard Contact data dict.
-    Follows the contract in resources/zoho/contact-mapping.md.
-    """
-    full_name = _derive_full_name(raw_record)
-    primary_email = _derive_primary_email(raw_record)
-    company_name = _derive_company_name(raw_record)
-    
-    # job_title: Title value, or None when missing or empty.
-    job_title = raw_record.get("Title") or None
-    if job_title:
-        job_title = job_title.strip() or None
+    # 2. full_name derivation
+    full_name = ""
+    # Rule 1: Full_Name field
+    fn_field = record.get("Full_Name")
+    if fn_field is not None and str(fn_field).strip():
+        full_name = str(fn_field).strip()
+    else:
+        # Rule 2: First_Name + Last_Name
+        first = record.get("First_Name") or ""
+        last = record.get("Last_Name") or ""
+        joined = f"{first} {last}".strip()
+        if joined:
+            full_name = joined
+        else:
+            # Rule 3: Email fallback
+            email_val = record.get("Email")
+            if email_val is not None and str(email_val).strip():
+                full_name = str(email_val).strip()
+            # Rule 4: Empty string (default)
+
+    # 3. primary_email
+    email_val = record.get("Email")
+    primary_email = str(email_val).strip().lower() if email_val and str(email_val).strip() else None
+
+    # 4. job_title
+    title_val = record.get("Title")
+    job_title = str(title_val).strip() if title_val and str(title_val).strip() else None
+
+    # 5. company_name derivation
+    account_name = record.get("Account_Name")
+    company_name = None
+    if isinstance(account_name, dict):
+        # Rule 1: Object shape
+        val = account_name.get("name")
+        if val is not None and str(val).strip():
+            company_name = str(val).strip()
+    elif isinstance(account_name, str):
+        # Rule 2: String shape
+        if account_name.strip():
+            company_name = account_name.strip()
+    # Rule 3: null/missing maps to None
+
+    # 6. custom_fields rules
+    consumed_keys = {"id", "Full_Name", "First_Name", "Last_Name", "Email", "Title", "Account_Name"}
+    custom_fields = {}
+    for k, v in record.items():
+        if k in consumed_keys:
+            continue
+        # Exclude Zoho system metadata starting with $
+        if k.startswith("$"):
+            continue
+        # Exclude Owner lookup object
+        if k == "Owner":
+            continue
+        custom_fields[k] = v
 
     return {
         "provider_id": "zoho",
-        "external_id": raw_record.get("id"),
+        "external_id": external_id,
         "full_name": full_name,
         "primary_email": primary_email,
         "job_title": job_title,
         "company_name": company_name,
-        "custom_fields": _extract_custom_fields(raw_record),
+        "custom_fields": custom_fields
     }
-
-
-def _derive_full_name(raw: dict[str, Any]) -> str:
-    """
-    Derivation rules:
-    1. Full_Name (stripped)
-    2. First_Name + Last_Name (joined, stripped)
-    3. Email (trimmed)
-    4. Empty string
-    """
-    # 1. Full_Name
-    val = raw.get("Full_Name")
-    if val and isinstance(val, str) and val.strip():
-        return val.strip()
-
-    # 2. First_Name + Last_Name
-    first = (raw.get("First_Name") or "").strip()
-    last = (raw.get("Last_Name") or "").strip()
-    joined = f"{first} {last}".strip()
-    if joined:
-        return joined
-
-    # 3. Email
-    email = raw.get("Email")
-    if email and isinstance(email, str) and email.strip():
-        return email.strip()
-
-    # 4. Fallback
-    return ""
-
-
-def _derive_primary_email(raw: dict[str, Any]) -> str | None:
-    """Email lowercased and trimmed, or None."""
-    val = raw.get("Email")
-    if val and isinstance(val, str) and val.strip():
-        return val.strip().lower()
-    return None
-
-
-def _derive_company_name(raw: dict[str, Any]) -> str | None:
-    """
-    Account_Name lookup rules:
-    1. Object: use name field
-    2. String: use string directly
-    3. Null/Missing: None
-    """
-    val = raw.get("Account_Name")
-    if not val:
-        return None
-
-    if isinstance(val, dict):
-        name = val.get("name")
-        if name and isinstance(name, str) and name.strip():
-            return name.strip()
-        return None
-
-    if isinstance(val, str):
-        return val.strip() or None
-
-    return None
-
-
-def _extract_custom_fields(raw: dict[str, Any]) -> dict[str, Any]:
-    """
-    Captures all fields except consumed ones and Zoho system metadata.
-    System metadata starts with '$' or is the 'Owner' lookup.
-    """
-    consumed_keys = {
-        "id",
-        "Full_Name",
-        "First_Name",
-        "Last_Name",
-        "Email",
-        "Title",
-        "Account_Name",
-    }
-    custom = {}
-    for key, value in raw.items():
-        if key in consumed_keys:
-            continue
-        if key.startswith("$"):
-            continue
-        if key == "Owner":
-            continue
-        custom[key] = value
-    return custom

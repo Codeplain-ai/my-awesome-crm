@@ -1,55 +1,53 @@
-import logging
-from typing import Any
+from typing import Any, Dict, Optional
 
-logger = logging.getLogger(__name__)
-
-def map_copper_person_to_contact(person: dict[str, Any]) -> dict[str, Any]:
+def map_copper_person_to_contact(record: Dict[str, Any]) -> Dict[str, Any]:
     """
-    Implements CopperContactMapping: converts a Copper People record to a Contact dict.
+    Maps a Copper People record to the conventional 'contact' data shape.
+    Follows [resource]resources/copper/contact-mapping.md.
+    """
     
-    This function follows the mapping rules defined in resources/copper/contact-mapping.md.
-    It is a pure function and does not raise exceptions for missing or malformed data
-    in the source record.
-    """
-    # external_id: record id rendered as decimal string
-    raw_id = person.get("id")
-    external_id = str(raw_id) if raw_id is not None else None
+    # 1. external_id derivation
+    raw_id = record.get("id")
+    external_id: Optional[str] = None
+    if raw_id is not None and str(raw_id).strip() != "":
+        external_id = str(raw_id)
 
-    # full_name derivation
-    # 1. name field stripped
-    # 2. first_name + last_name
-    # 3. empty string
-    name = person.get("name")
-    if name and name.strip():
-        full_name = name.strip()
+    # 2. full_name derivation
+    name_field = (record.get("name") or "").strip()
+    if name_field:
+        full_name = name_field
     else:
-        first = person.get("first_name") or ""
-        last = person.get("last_name") or ""
+        first = (record.get("first_name") or "").strip()
+        last = (record.get("last_name") or "").strip()
         full_name = f"{first} {last}".strip()
 
-    # primary_email: first entry of emails[] where email is non-empty, lowercased and trimmed.
-    primary_email = None
-    emails = person.get("emails") or []
+    # 3. primary_email derivation
+    primary_email: Optional[str] = None
+    emails = record.get("emails") or []
     for entry in emails:
         if isinstance(entry, dict):
-            val = entry.get("email")
-            if val and val.strip():
-                primary_email = val.strip().lower()
+            email_val = entry.get("email")
+            if email_val and email_val.strip():
+                primary_email = email_val.strip().lower()
                 break
 
-    # custom_fields: captures date_created and date_modified verbatim when present
+    # 4. job_title and company_name
+    job_title = record.get("title") or None
+    company_name = record.get("company_name") or None
+
+    # 5. custom_fields (provenance timestamps)
     custom_fields = {}
-    if person.get("date_created") is not None:
-        custom_fields["date_created"] = person["date_created"]
-    if person.get("date_modified") is not None:
-        custom_fields["date_modified"] = person["date_modified"]
+    for key in ["date_created", "date_modified"]:
+        val = record.get(key)
+        if val is not None:
+            custom_fields[key] = val
 
     return {
         "provider_id": "copper",
         "external_id": external_id,
         "full_name": full_name,
         "primary_email": primary_email,
-        "job_title": person.get("title") or None,
-        "company_name": person.get("company_name") or None,
+        "job_title": job_title,
+        "company_name": company_name,
         "custom_fields": custom_fields,
     }

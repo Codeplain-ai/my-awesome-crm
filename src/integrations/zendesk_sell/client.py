@@ -1,65 +1,60 @@
-import os
 import logging
-from typing import Any, Dict, Generator
+from typing import Generator, Dict, Any, Optional
 import httpx
 
 logger = logging.getLogger(__name__)
 
 class ZendeskSellClient:
     """
-    Client for interacting with the Zendesk Sell v2 REST API.
+    HTTP Client for Zendesk Sell v2 API.
+    Handles authentication, mandatory headers, and pagination following meta.links.next_page.
     """
     BASE_URL = "https://api.getbase.com"
+    USER_AGENT = "CRM-Integration-Host/1.0 (Zendesk Sell Integration)"
 
-    def __init__(self):
-        token = os.environ.get("ZENDESK_SELL_ACCESS_TOKEN")
+    def __init__(self, token: str):
         if not token:
-            error_msg = "Missing environment variable: ZENDESK_SELL_ACCESS_TOKEN"
-            logger.error(error_msg)
-            raise RuntimeError(error_msg)
-        
+            raise ValueError("Zendesk Sell access token cannot be empty")
+        self.token = token
         self.headers = {
             "Authorization": f"Bearer {token}",
             "Accept": "application/json",
-            "User-Agent": "ZendeskSell-CRM-Integration/1.0"
+            "User-Agent": self.USER_AGENT
         }
 
     def list_all_contacts(self) -> Generator[Dict[str, Any], None, None]:
         """
-        Generator that yields individual items from the /v2/contacts endpoint,
-        automatically following pagination links.
+        Yields every contact from the /v2/contacts endpoint by following pagination links.
         """
-        # OpenAPI spec pins per_page to 100.
-        next_page_url = f"{self.BASE_URL}/v2/contacts?per_page=100"
+        url = f"{self.BASE_URL}/v2/contacts"
+        params: Optional[Dict[str, Any]] = {"per_page": 100}
 
         with httpx.Client(headers=self.headers, timeout=30.0) as client:
-            while next_page_url:
+            while url:
+                logger.debug(f"Fetching Zendesk Sell contacts from: {url}")
+                # After the first page, the URL from next_page is used verbatim (params=None)
+                response = client.get(url, params=params)
+                
+                if response.status_code == 401:
+                    raise RuntimeError(
+                        f"Zendesk Sell API 401 Unauthorized: Invalid or expired token. "
+                        f"Response: {response.text}"
+                    )
+                
                 try:
-                    logger.debug(f"Fetching Zendesk Sell contacts: {next_page_url}")
-                    response = client.get(next_page_url)
-                    
-                    if response.status_code != 200:
-                        error_msg = (
-                            f"Zendesk Sell API request failed with status {response.status_code}. "
-                            f"URL: {next_page_url}, Response: {response.text}"
-                        )
-                        logger.error(error_msg)
-                        response.raise_for_status()
-
-                    payload = response.json()
-                    
-                    items = payload.get("items", [])
-                    for item in items:
-                        yield item
-
-                    # Pagination: follow meta.links.next_page
-                    meta = payload.get("meta", {})
-                    links = meta.get("links", {})
-                    next_page_url = links.get("next_page")
-
+                    response.raise_for_status()
                 except httpx.HTTPStatusError as e:
-                    logger.error(f"Zendesk Sell API error: {e.response.status_code} - {e.response.text}")
-                    raise
-                except Exception as e:
-                    logger.error(f"Unexpected error calling Zendesk Sell API: {str(e)}")
-                    raise
+                    logger.error(f"Zendesk Sell API error: {e.response.text}")
+                    raise RuntimeError(f"Zendesk Sell API request failed with status {e.response.status_code}")
+
+                payload = response.json()
+                items = payload.get("items", [])
+                for item in items:
+                    if "data" in item:
+                        yield item["data"]
+
+                # Pagination: follow meta.links.next_page
+                meta = payload.get("meta", {})
+                links = meta.get("links", {})
+                url = links.get("next_page")
+                params = None # Parameters are baked into next_page URL
