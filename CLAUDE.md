@@ -242,9 +242,10 @@ mandates that an error message "names" something, pin the identifier space and g
   and the log for `Specification ambiguity detected` blocks. Every RESOLVED entry and ambiguity
   suggestion is a render-time incident whose lesson gets folded into the specs and this file.
 - **Every test script derives its interpreter from the host venv — never from `PATH`.** Python
-  `>= 3.12` is a *floor*, not a pin (any newer interpreter is fine), but the tests must run on the
-  **same** interpreter as the host. All four `plain/test_scripts/` runners therefore resolve
-  `$HOST_CODEBASE_ROOT/.venv` (created by `scripts/start.{sh,ps1}`) and fail fast with exit `69`
+  `>= 3.12` is a *floor*, not a pin (any newer stable release is fine, pre-releases are not), but
+  the tests must run on the **same** interpreter as the host. All four `plain/test_scripts/`
+  runners therefore resolve `$HOST_CODEBASE_ROOT/.venv` (created by `scripts/start.{sh,ps1}`) and
+  fail fast with exit `69`
   when it is absent or invalid; the unit-test runners run *in* it, and the conformance runners build
   their isolated suite venv *from* it (isolation is still needed — the suite installs its own test
   deps, e.g. `respx`). **Never reintroduce a newest-on-`PATH` candidate scan** (`py -3.15`,
@@ -252,7 +253,8 @@ mandates that an error message "names" something, pin the identifier space and g
   runs the suite on an interpreter the host never uses, which is how a `respx` install broke a
   render on a Windows machine whose host venv was 3.12 while the test venv resolved to 3.14. That
   scan belongs only in `scripts/start.{sh,ps1}`, which *provisions* the host venv — and both
-  platforms' copies must agree on the `>= 3.12` floor (Windows previously required *exactly* 3.12).
+  platforms' copies must agree on the window at both ends (Windows previously required *exactly*
+  3.12).
 - **A `.sh` script and its mirroring `.ps1` are maintained in lockstep — never fix one alone.** The
   two are not alternatives; they are the same contract on two platforms, wired up by two configs
   (`plain/config.yaml` → `test_scripts/*.sh`, `plain/config.pwsh.yaml` → `test_scripts/*.ps1`), so a

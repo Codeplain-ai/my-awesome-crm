@@ -2,7 +2,7 @@
 #
 # start.sh — one-shot getting-started + run script for My Awesome CRM.
 #
-# Idempotent: on first run it bootstraps everything (Python >= 3.12, virtualenv,
+# Idempotent: on first run it bootstraps everything (Python 3.12-3.14, virtualenv,
 # dependencies) and starts the server; on subsequent runs it detects that the
 # environment is already set up and just starts the server.
 #
@@ -22,11 +22,14 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 VENV_DIR="$PROJECT_ROOT/.venv"
 REQUIREMENTS="$PROJECT_ROOT/requirements.txt"
-# Minimum supported Python. Any interpreter at this version or newer is accepted;
-# this exact version is only used as the target when we have to auto-install one.
+# Any stable Python release from 3.12 up. The ceiling excludes pre-releases
+# (3.15 is a RC and our dependencies don't support it). 
+# The minimum version is what auto-install targets.
 MIN_PYTHON_VERSION="3.12"
+MAX_PYTHON_VERSION="3.14"
 MIN_PYTHON_MAJOR="3"
 MIN_PYTHON_MINOR="12"
+MAX_PYTHON_MINOR="14"
 
 cd "$PROJECT_ROOT"
 
@@ -39,22 +42,22 @@ warn()  { printf '\033[0;33m  ! \033[0m%s\n' "$*"; }
 error() { printf '\033[0;31mERROR:\033[0m %s\n' "$*" >&2; }
 
 # ---------------------------------------------------------------------------
-# 1. Ensure Python >= 3.12 is available.
+# 1. Ensure a supported Python (3.12 - 3.14) is available.
 # ---------------------------------------------------------------------------
-# Returns 0 if the given interpreter reports a version >= the minimum.
-python_meets_min() {
-    "$1" -c "import sys; sys.exit(0 if sys.version_info[:2] >= ($MIN_PYTHON_MAJOR, $MIN_PYTHON_MINOR) else 1)" 2>/dev/null
+# Returns 0 if the given interpreter falls inside the supported window.
+python_in_range() {
+    "$1" -c "import sys; sys.exit(0 if ($MIN_PYTHON_MAJOR, $MIN_PYTHON_MINOR) <= sys.version_info[:2] <= ($MIN_PYTHON_MAJOR, $MAX_PYTHON_MINOR) else 1)" 2>/dev/null
 }
 
 find_python() {
-    # Try, in order: version-specific launchers from newest known down to the
-    # minimum, then the generic python3 / python. First one meeting the minimum
-    # wins. This makes the script agnostic to the exact 3.x that's installed.
+    # Try, in order: version-specific launchers from the newest supported down
+    # to the minimum, then the generic python3 / python. First one inside the
+    # supported range wins, so the script is agnostic to the exact 3.x installed.
     local candidate
     for candidate in \
-        python3.15 python3.14 python3.13 "python$MIN_PYTHON_VERSION" \
+        python3.14 python3.13 "python$MIN_PYTHON_VERSION" \
         python3 python; do
-        if command -v "$candidate" >/dev/null 2>&1 && python_meets_min "$candidate"; then
+        if command -v "$candidate" >/dev/null 2>&1 && python_in_range "$candidate"; then
             echo "$candidate"
             return 0
         fi
@@ -102,11 +105,11 @@ install_python() {
     esac
 }
 
-info "Checking for Python >= $MIN_PYTHON_VERSION..."
+info "Checking for Python $MIN_PYTHON_VERSION - $MAX_PYTHON_VERSION..."
 if PYTHON_BIN="$(find_python)"; then
     ok "Found: $($PYTHON_BIN --version 2>&1)"
 else
-    warn "No Python >= $MIN_PYTHON_VERSION was found."
+    warn "No supported Python ($MIN_PYTHON_VERSION - $MAX_PYTHON_VERSION) was found."
     read -r -p "Install Python $MIN_PYTHON_VERSION now? [y/N] " reply
     case "$reply" in
         [yY][eE][sS]|[yY])
@@ -114,12 +117,12 @@ else
             if PYTHON_BIN="$(find_python)"; then
                 ok "Installed: $($PYTHON_BIN --version 2>&1)"
             else
-                error "Python >= $MIN_PYTHON_VERSION still not found after install. Please install it manually."
+                error "A supported Python ($MIN_PYTHON_VERSION - $MAX_PYTHON_VERSION) is still not found after install. Please install it manually."
                 exit 1
             fi
             ;;
         *)
-            error "Python >= $MIN_PYTHON_VERSION is required to run this project. Aborting."
+            error "Python $MIN_PYTHON_VERSION - $MAX_PYTHON_VERSION is required to run this project. Aborting."
             exit 1
             ;;
     esac
