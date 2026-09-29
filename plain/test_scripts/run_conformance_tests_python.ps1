@@ -2,24 +2,36 @@
 <#
 Conformance-test runner for an EMBEDDED CRM integration plug-in (PowerShell port).
 
-Variant: install-inline (no prepare_environment_python.ps1 exists). This maps
-the embedded Java conformance flow onto Python:
+Variant: activate-only. prepare_environment_python.ps1 runs once per render and
+builds the venv (host requirements.txt + pytest); this script attaches to it
+and exits 69 if it is missing. This maps the embedded Java conformance flow
+onto Python:
 
-  Java                                   | Python (this script)
+  Java                                   | Python
   ---------------------------------------|----------------------------------------
-  mvn install from ROOT (host + impl)     | overlay $1 (generated impl) into the
-    -> artifact in ~/.m2                  |   host ROOT src/integrations/<name>/,
-                                          |   install ROOT requirements.txt
-  cd .tmp/java_conformance && mvn install | stage $2 into a system-temp folder,
-    -> resolve conformance deps           |   install the conformance suite's deps
-  mvn test (impl from ~/.m2)              | cd <system temp>/... && pytest
-                                          |   with PYTHONPATH=ROOT so the ROOT impl
-                                          |   code is what gets imported
+  mvn install from ROOT (host + impl)     | prepare: venv + host requirements.txt
+    -> artifact in ~/.m2                  | this script: snapshot the host into
+                                          |   the workspace, overlay $1 (generated
+                                          |   impl) onto its src/integrations/<name>/
+  cd .tmp/java_conformance && mvn install | stage $2 into the workspace, install
+    -> resolve conformance deps           |   the suite's own deps (if any) into
+                                          |   the prepared venv
+  mvn test (impl from ~/.m2)              | cd <workspace>/conformance && pytest
+                                          |   with PYTHONPATH=<workspace>/host so
+                                          |   the snapshot's impl is imported
 
-$1 (build folder) is overlaid into the host root per the embedded contract
-(scoped to the module's own package dir). $2 (conformance tests) is copied
-into a working folder in the system temp directory and run from there, leaving
-the authored test tree pristine.
+Every run works in its OWN isolated workspace in the system temp directory
+(unique per run), so several renders can run conformance side by side without
+clobbering each other or the real host tree:
+
+  <workspace>/host/         host codebase snapshot + $1 overlaid onto it
+  <workspace>/conformance/  copy of $2 (the authored test tree stays pristine)
+
+The real host tree is never written to, and the workspace is removed on exit.
+The prepared venv (<temp>\python_conformance_env_<module>_<hash>\.venv, see
+prepare_environment_python.ps1) is shared by the module's runs and never
+deleted here; prepare owns its lifecycle. $1 is still overlaid on every run
+because the generated implementation changes after each functional spec.
 
   Usage: run_conformance_tests_python.ps1 <build_folder> <conformance_tests_folder>
 
@@ -35,6 +47,10 @@ Environment overrides:
   HOST_CODEBASE_ROOT  host repo root (default: parent of plain/)
   ENV_FILE            path to the required .env file (default: <host root>/.env)
 
+Top-level host entries NOT copied into the workspace snapshot: VCS metadata,
+the venv, secrets (loaded from the real host .env in [6/9] instead), local
+data, caches, agent tooling, and the ***plain project itself.
+
 This is the Windows counterpart of run_conformance_tests_python.sh and does
 exactly the same thing: same staging model, same .env loading, same pytest
 flags, and the same strict verdict (only a clean pytest exit with zero
@@ -43,15 +59,27 @@ failures/errors/skips passes; no collected tests exits 1).
 
 $UNRECOVERABLE_ERROR_EXIT_CODE = 69
 $NO_TESTS_EXIT_CODE = 1
+$SnapshotExcludes = @('.git', '.venv', '.env', 'crm.db', '.pytest_cache', '.tmp', 'plain', '.claude', '.agents', '.opencode', '.plainwright')
 
 function Write-Err($msg) { [Console]::Error.WriteLine($msg) }
 function Banner($msg) { Write-Host ""; Write-Host "===== $msg =====" }
 
-# ----- [1/8] Toolchain check ------------------------------------------------
-Banner "[1/8] Toolchain check"
+$Workspace = $null
+# Remove this run's workspace (if created) and exit - the counterpart of the
+# Bash `trap ... EXIT`.
+function Exit-Run($code) {
+    if ($Workspace -and (Test-Path -LiteralPath $Workspace)) {
+        Set-Location -LiteralPath ([System.IO.Path]::GetTempPath())
+        Remove-Item -LiteralPath $Workspace -Recurse -Force -ErrorAction SilentlyContinue
+    }
+    exit $code
+}
+
+# ----- [1/9] Toolchain check ------------------------------------------------
+Banner "[1/9] Toolchain check"
 # The conformance suite runs in its own isolated venv (it installs its own test
 # dependencies, which must not pollute the host environment), but that venv is
-# built from the HOST project's interpreter at $HOST_CODEBASE_ROOT\.venv - the
+# built (by prepare_environment_python.ps1) from the HOST project's interpreter at $HOST_CODEBASE_ROOT\.venv - the
 # one scripts\start.ps1 provisioned. The project's floor is Python >= 3.12 and
 # any interpreter at or above it is fine; what is NOT fine is the tests running
 # on a DIFFERENT interpreter than the host. Selecting one off PATH here did
@@ -76,8 +104,8 @@ if (-not (Test-Path -LiteralPath $PyExe -PathType Leaf) -or
 Write-Host "Python interpreter: $PyExe (host venv)"
 & $PyExe --version
 
-# ----- [2/8] Argument validation --------------------------------------------
-Banner "[2/8] Argument validation"
+# ----- [2/9] Argument validation --------------------------------------------
+Banner "[2/9] Argument validation"
 if ($args.Count -lt 1 -or [string]::IsNullOrEmpty($args[0])) {
     Write-Err "Error: No build folder provided."
     Write-Err "Usage: $($MyInvocation.MyCommand.Name) <build_folder> <conformance_tests_folder>"
@@ -101,9 +129,9 @@ if (-not (Test-Path -LiteralPath $TestsFolder -PathType Container)) {
     exit $UNRECOVERABLE_ERROR_EXIT_CODE
 }
 
-# ----- [3/8] Resolve paths --------------------------------------------------
-Banner "[3/8] Resolve paths"
-# $PlainDir / $HostRoot were already resolved (and validated) in [1/8], because
+# ----- [3/9] Resolve paths --------------------------------------------------
+Banner "[3/9] Resolve paths"
+# $PlainDir / $HostRoot were already resolved (and validated) in [1/9], because
 # the host venv there is derived from them.
 $current_dir = (Get-Location).Path
 $AbsBuildFolder = (Resolve-Path -LiteralPath $BuildFolder).Path
@@ -114,12 +142,60 @@ Write-Host "Build folder (impl source):    $AbsBuildFolder"
 Write-Host "Conformance tests source:      $AbsTestsFolder"
 Write-Host "Host codebase root:            $HostRoot"
 
-# ----- [4/8] Overlay generated implementation into the host ROOT ------------
+# The prepared environment - keep this derivation identical to
+# prepare_environment_python.ps1.
+$ModuleName = Split-Path (Split-Path $AbsBuildFolder -Parent) -Leaf
+$PathHash = (& $PyExe -c 'import hashlib, sys; print(hashlib.sha1(sys.argv[1].encode()).hexdigest()[:8])' $AbsBuildFolder)
+$PreparedEnv = Join-Path ([System.IO.Path]::GetTempPath()) "python_conformance_env_$($ModuleName)_$("$PathHash".Trim())"
+$VenvDir = Join-Path $PreparedEnv '.venv'
+$VenvPy = Join-Path (Join-Path $VenvDir 'Scripts') 'python.exe'
+Write-Host "Prepared env:                  $PreparedEnv"
+
+if (-not (Test-Path -LiteralPath $VenvPy -PathType Leaf) -or
+    -not (Test-Path -LiteralPath (Join-Path $VenvDir 'pyvenv.cfg') -PathType Leaf) -or
+    -not (Test-Path -LiteralPath (Join-Path $PreparedEnv '.prepared') -PathType Leaf)) {
+    Write-Err "Error: prepared environment missing or incomplete at $PreparedEnv."
+    Write-Err "       Run prepare_environment_python.ps1 $AbsBuildFolder first."
+    exit $UNRECOVERABLE_ERROR_EXIT_CODE
+}
+
+# ----- [4/9] Create the isolated workspace and snapshot the host -----------
+Banner "[4/9] Create workspace and snapshot host"
+# The workspace lives in the system temp directory (an absolute path), not
+# inside the project, so no build debris is left in the repo. A GUID suffix
+# makes the name unique per run; $2's leaf name only labels it (never
+# concatenate the raw argument).
+$Workspace = Join-Path ([System.IO.Path]::GetTempPath()) ("python_conformance_$(Split-Path $AbsTestsFolder -Leaf)." + [guid]::NewGuid().ToString('N').Substring(0, 12))
+try {
+    New-Item -ItemType Directory -Path $Workspace -ErrorAction Stop | Out-Null
+} catch {
+    Write-Err "Error: could not create workspace $Workspace"
+    $Workspace = $null
+    exit $UNRECOVERABLE_ERROR_EXIT_CODE
+}
+$HostSnapshot = Join-Path $Workspace 'host'
+$WorkingFolder = Join-Path $Workspace 'conformance'
+New-Item -ItemType Directory -Force -Path $HostSnapshot | Out-Null
+New-Item -ItemType Directory -Force -Path $WorkingFolder | Out-Null
+Write-Host "Workspace:     $Workspace"
+Write-Host "Host snapshot: $HostSnapshot"
+
+foreach ($entry in (Get-ChildItem -LiteralPath $HostRoot -Force)) {
+    if ($SnapshotExcludes -contains $entry.Name) { continue }
+    try {
+        Copy-Item -LiteralPath $entry.FullName -Destination $HostSnapshot -Recurse -Force -ErrorAction Stop
+    } catch {
+        Write-Err "Error: failed to copy $($entry.FullName) into host snapshot $HostSnapshot"
+        Exit-Run $UNRECOVERABLE_ERROR_EXIT_CODE
+    }
+}
+
+# ----- [5/9] Overlay generated implementation onto the host snapshot --------
 # Mirrors the Java "mvn install from root with all code" step: put the freshly
 # generated implementation where the conformance suite will import it from
-# (root's src/). Scoped to the module's own integration package dir(s) only -
-# never the host's top-level src/ or tests/.
-Banner "[4/8] Overlay implementation into host root"
+# (the snapshot's src/). Scoped to the module's own integration package dir(s)
+# of the snapshot only.
+Banner "[5/9] Overlay implementation onto host snapshot"
 $StagedAny = $false
 foreach ($sub in @('src', 'tests')) {
     $pkgRoot = Join-Path (Join-Path $AbsBuildFolder $sub) 'integrations'
@@ -127,8 +203,8 @@ foreach ($sub in @('src', 'tests')) {
     foreach ($pkg in (Get-ChildItem -LiteralPath $pkgRoot -Directory)) {
         $name = $pkg.Name
         $rel = "$sub/integrations/$name"
-        $dest = Join-Path (Join-Path (Join-Path $HostRoot $sub) 'integrations') $name
-        Write-Host "Staging $rel into host root"
+        $dest = Join-Path (Join-Path (Join-Path $HostSnapshot $sub) 'integrations') $name
+        Write-Host "Staging $rel into host snapshot"
         if (Test-Path -LiteralPath $dest) { Remove-Item -LiteralPath $dest -Recurse -Force -ErrorAction SilentlyContinue }
         New-Item -ItemType Directory -Force -Path $dest | Out-Null
         Copy-Item -Path (Join-Path $pkg.FullName '*') -Destination $dest -Recurse -Force
@@ -137,20 +213,20 @@ foreach ($sub in @('src', 'tests')) {
 }
 if (-not $StagedAny) {
     Write-Err "Error: build folder ships no src/integrations/<name>/ packages: $AbsBuildFolder"
-    exit $UNRECOVERABLE_ERROR_EXIT_CODE
+    Exit-Run $UNRECOVERABLE_ERROR_EXIT_CODE
 }
 
-# ----- [5/8] Provider credentials (live run) --------------------------------
+# ----- [6/9] Provider credentials (live run) --------------------------------
 # A .env at the project root is REQUIRED. This step only guarantees the file
 # exists and loads it into the environment - it is integration-agnostic and
 # never validates any specific secret by name. Each integration validates the
 # credentials it needs at call time; the live run surfaces a missing one.
-Banner "[5/8] Provider credentials"
+Banner "[6/9] Provider credentials"
 if ($env:ENV_FILE) { $EnvFile = $env:ENV_FILE } else { $EnvFile = Join-Path $HostRoot '.env' }
 if (-not (Test-Path -LiteralPath $EnvFile -PathType Leaf)) {
     Write-Err "Error: credentials file not found: $EnvFile"
     Write-Err "       :ConformanceTests: run live and require a .env at the project root."
-    exit $UNRECOVERABLE_ERROR_EXIT_CODE
+    Exit-Run $UNRECOVERABLE_ERROR_EXIT_CODE
 }
 Write-Host "Loading credentials from $EnvFile (shell-exported vars take precedence)"
 # Shell-exported credentials are authoritative; .env only fills variables the
@@ -174,85 +250,45 @@ foreach ($line in (Get-Content -LiteralPath $EnvFile)) {
     }
 }
 
-# ----- [6/8] Stage conformance tests into a system-temp working folder ------
-Banner "[6/8] Stage conformance tests into working folder"
-# The working folder lives in the system temp directory (an absolute path), not
-# inside the project, so no build debris is left in the repo. $2 arrives as an
-# absolute path from current renderers, so only its leaf name is used to name
-# the folder (never concatenate the raw argument).
-$WorkingFolder = Join-Path ([System.IO.Path]::GetTempPath()) "python_conformance_$(Split-Path $AbsTestsFolder -Leaf)"
+# ----- [7/9] Stage conformance tests into the workspace ---------------------
+Banner "[7/9] Stage conformance tests into working folder"
+# The working folder is freshly created inside this run's workspace, so no
+# stale files from a previous run can be collected alongside this run's tests.
 Write-Host "Working folder: $WorkingFolder"
-# Remove the folder itself in one shot so no stale files from a previous
-# conformance run (e.g. a nested .venv) are picked up by pytest alongside the
-# current run's freshly-copied tests.
-if (Test-Path -LiteralPath $WorkingFolder) { Remove-Item -LiteralPath $WorkingFolder -Recurse -Force -ErrorAction SilentlyContinue }
-New-Item -ItemType Directory -Force -Path $WorkingFolder | Out-Null
 Copy-Item -Path (Join-Path $AbsTestsFolder '*') -Destination $WorkingFolder -Recurse -Force
 
-# ----- [7/8] Install dependencies (isolated venv inside working folder) -----
-Banner "[7/8] Install dependencies"
+# ----- [8/9] Attach to the prepared venv ------------------------------------
+Banner "[8/9] Attach to prepared venv"
+# Host requirements and pytest were installed by prepare_environment_python.ps1.
+# Only the suite's own deps vary per functional spec; they go into the prepared
+# venv, where pip skips anything already satisfied.
 $start_time = Get-Date
-$VenvDir = Join-Path $WorkingFolder '.venv'
-& $PyExe -m venv $VenvDir
-if ($LASTEXITCODE -ne 0) {
-    Write-Err "Error: failed to create virtual environment at $VenvDir"
-    exit $UNRECOVERABLE_ERROR_EXIT_CODE
-}
-$VenvPy = Join-Path (Join-Path $VenvDir 'Scripts') 'python.exe'
-
-# Some hosts create a venv without pip. pip must be present inside the venv;
-# try to bootstrap it with ensurepip, and if it still is not available, fail
-# fast with 69 rather than dying later with an opaque error.
-& $VenvPy -m pip --version 2>$null | Out-Null
-if ($LASTEXITCODE -ne 0) {
-    Write-Err "pip not found in venv; attempting to bootstrap it with ensurepip"
-    & $VenvPy -m ensurepip --upgrade --default-pip 2>$null | Out-Null
-}
-& $VenvPy -m pip --version 2>$null | Out-Null
-if ($LASTEXITCODE -ne 0) {
-    Write-Err "Error: pip is not available in the venv at $VenvDir and could not be bootstrapped."
-    Write-Err "       Install the platform's Python venv/pip support (e.g. the python-venv package) and retry."
-    exit $UNRECOVERABLE_ERROR_EXIT_CODE
-}
-
-& $VenvPy -m pip install --upgrade pip
-if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-
-# Host runtime deps ("from src") so the root implementation imports cleanly.
-$hostReq = Join-Path $HostRoot 'requirements.txt'
-if (Test-Path -LiteralPath $hostReq) {
-    Write-Host "Installing host requirements from $hostReq"
-    & $VenvPy -m pip install -r $hostReq
-    if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-}
-# Conformance suite's own deps ("from conformance"), if it ships any.
+Write-Host "Using prepared venv $VenvDir"
 $workReq = Join-Path $WorkingFolder 'requirements.txt'
 if (Test-Path -LiteralPath $workReq) {
     Write-Host "Installing conformance-suite requirements"
     & $VenvPy -m pip install -r $workReq
-    if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+    if ($LASTEXITCODE -ne 0) { Exit-Run $LASTEXITCODE }
 }
-& $VenvPy -m pip install pytest
-if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
 $end_time = Get-Date
 $elapsed = [int]([math]::Round(($end_time - $start_time).TotalSeconds))
 Write-Host "Requirements setup completed in $elapsed seconds"
 
-# ----- [8/8] Run conformance tests LIVE from working folder, impl from ROOT -
-Banner "[8/8] Run conformance tests (live provider)"
+# ----- [9/9] Run conformance tests LIVE, impl from the host snapshot --------
+Banner "[9/9] Run conformance tests (live provider)"
 try {
     Set-Location -LiteralPath $WorkingFolder -ErrorAction Stop
 } catch {
     Write-Err "Error: could not enter working folder $WorkingFolder"
-    exit $UNRECOVERABLE_ERROR_EXIT_CODE
+    Exit-Run $UNRECOVERABLE_ERROR_EXIT_CODE
 }
-# PYTHONPATH=ROOT => `from src.integrations.<name> import ...` resolves to the
-# implementation code in the host root, not anything under the working folder.
+# PYTHONPATH=snapshot => `from src.integrations.<name> import ...` resolves to
+# the implementation code in this run's host snapshot, never the real host tree.
 if ($env:PYTHONPATH) {
-    $env:PYTHONPATH = "$HostRoot" + [IO.Path]::PathSeparator + $env:PYTHONPATH
+    $env:PYTHONPATH = "$HostSnapshot" + [IO.Path]::PathSeparator + $env:PYTHONPATH
 } else {
-    $env:PYTHONPATH = $HostRoot
+    $env:PYTHONPATH = $HostSnapshot
 }
 
 $TestArgs = @(
@@ -268,7 +304,7 @@ $TestArgs = @(
     '--log-cli-level=DEBUG',
     '--import-mode=importlib',
     '-p', 'no:cacheprovider',
-    "--basetemp=$(Join-Path $WorkingFolder '.pytest_tmp')",
+    "--basetemp=$(Join-Path $Workspace '.pytest_tmp')",
     $WorkingFolder
 )
 
@@ -295,7 +331,7 @@ if ($exit_code -eq 5 -or ($summary_line -match 'no tests ran')) {
     Write-Err ""
     Write-Err "Error: No conformance tests discovered in $WorkingFolder."
     Write-Err "Failure context: cwd=$((Get-Location).Path) current_dir=$current_dir tests=$AbsTestsFolder"
-    exit $NO_TESTS_EXIT_CODE
+    Exit-Run $NO_TESTS_EXIT_CODE
 }
 
 # Strict pass criteria: clean exit AND zero failures / errors / skipped.
@@ -305,10 +341,10 @@ if ($exit_code -ne 0 -or ($summary_line -match '[0-9]+ (failed|error|skipped|xfa
     Write-Err "All conformance tests must pass with zero failures, errors, and skips."
     Write-Err "Failure context: cwd=$((Get-Location).Path) current_dir=$current_dir tests=$AbsTestsFolder PYTHONPATH=$env:PYTHONPATH"
     if ($exit_code -eq 0) { $exit_code = 1 }
-    exit $exit_code
+    Exit-Run $exit_code
 }
 
 Write-Host ""
 Write-Host "Conformance run passed."
-Write-Host "Summary: variant=install-inline cmd='$VenvPy $($TestArgs -join ' ')' exit=$exit_code current_dir=$current_dir working_folder=$WorkingFolder"
-exit $exit_code
+Write-Host "Summary: variant=activate-only cmd='$VenvPy $($TestArgs -join ' ')' exit=$exit_code current_dir=$current_dir working_folder=$WorkingFolder"
+Exit-Run $exit_code
