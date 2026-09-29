@@ -23,6 +23,7 @@ description: "Shared conformance-testing requirements for every CRM integration 
   - This covers the integration's `fetch(get_stored)` entry point and the runtime wiring that invokes it.
   - Such a run that never reached the provider proves nothing and must be treated as a failure.
   - These :ConformanceTests: exercise `fetch(get_stored)` end to end against the live API and assert the returned records conform to the `data` shape the integration emits for its data_type (the contact shape for contact integrations).
+  - Patching a provider client, an HTTP method, or `fetch(get_stored)` internals is not allowed in these :ConformanceTests:, except for the rate-limit (HTTP 429) endpoint.
 
 - :ConformanceTests: of every :Mapping: run offline against mocked provider records.
   - They generate dummy records that conform to the provider record schema identified by the concrete :Mapping:.
