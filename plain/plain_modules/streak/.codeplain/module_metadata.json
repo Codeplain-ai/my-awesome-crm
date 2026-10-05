@@ -1,9 +1,0 @@
-{
-    "source_hash": "ee497550657c24b2fbcd1ae7ec802e9b7a979f127ea15766deb7075da8e97f79",
-    "non_functional_source_hash": "306cbe86082d9380837d00242a2654167f6d1495622029e97b7cdf3105521871",
-    "functionalities": [
-        "- :StreakContactMapping: maps one `ContactRecord` of :StreakRestAPI: to a :Contact:.",
-        "- :StreakIntegration: exposes a `fetch(get_stored)` entry point.\n  - It reads the following required environment variable:\n    - `STREAK_API_KEY` - the Streak API key used as the HTTP Basic username with an empty password\n  - It raises `RuntimeError` naming the environment variable key when it is missing or empty.\n  - It follows :StreakRestAPI: to authenticate, read the contacts of every accessible team, map every record with :StreakContactMapping:, and return the mapped :Contact: data dicts.",
-        "- :StreakIntegration: exports `fetch(get_stored)` from `__init__.py`."
-    ]
-}

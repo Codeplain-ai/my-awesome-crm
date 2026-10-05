@@ -1,0 +1,169 @@
+openapi: 3.1.0
+info:
+  title: HubSpot REST API surface used by the hubspot integration
+  description: >
+    The exact HubSpot REST API surface the hubspot integration calls. Grounded in
+    https://developers.hubspot.com/docs/api-reference/latest/crm/objects/contacts/get-contacts
+    AND verified against the live portal (read-only GET probes). Where docs and
+    the live API disagreed, the live API wins. The path is pinned to the stable
+    /crm/v3 line (the docs now advertise date-versioned /crm/objects/2026-09/...;
+    /crm/v3 was probed and returns 200).
+  version: v3
+servers:
+  - url: https://api.hubapi.com
+    description: Fixed API host; there is no per-portal base URL.
+paths:
+  /crm/v3/objects/contacts:
+    get:
+      operationId: listContacts
+      summary: List contacts (one page)
+      description: >
+        Authenticated with a private app access token. Requires scope
+        crm.objects.contacts.read. Subsequent pages are fetched by repeating the
+        request with after set to paging.next.after — see
+        components.schemas.ContactPage.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: limit
+          in: query
+          required: true
+          description: >
+            Pinned to 100, the maximum. Live probe: limit=1000 returns 400
+            VALIDATION_ERROR "You can only request at most 100 objects in one request."
+          schema:
+            type: integer
+            const: 100
+        - name: properties
+          in: query
+          required: true
+          description: >
+            Comma-separated. Pinned; without it only default properties come back.
+            Live probe: unset properties are returned as null or omitted.
+          schema:
+            type: string
+            const: firstname,lastname,email,jobtitle,company
+        - name: after
+          in: query
+          required: false
+          description: Cursor taken from the previous page's paging.next.after; absent on the first request.
+          schema:
+            type: string
+      responses:
+        "200":
+          description: One page of contacts.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ContactPage"
+        "400":
+          description: "Invalid query, e.g. limit above 100 (live probe: category VALIDATION_ERROR)."
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+        "401":
+          description: "Missing or invalid token (live probe: category INVALID_AUTHENTICATION)."
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      description: >
+        Private app access token from env var HUBSPOT_ACCESS_TOKEN, sent as
+        Authorization: Bearer <token> on every request. No token endpoint, no
+        refresh; a fresh request carries the same static token.
+  schemas:
+    ContactPage:
+      type: object
+      description: >
+        Cursor pagination. While more pages exist, paging.next.after holds the
+        cursor; pass it back verbatim as the after query parameter. Stop when
+        paging is absent. Live-API wins: paging.next.link points at a different
+        path (/crm/objects/v3/contacts) than the one called — never follow
+        link, always re-request the pinned path with after.
+      required: [results]
+      properties:
+        results:
+          type: array
+          items:
+            $ref: "#/components/schemas/ContactRecord"
+        paging:
+          type: object
+          description: Absent on the last page.
+          properties:
+            next:
+              type: object
+              required: [after]
+              properties:
+                after:
+                  type: string
+                link:
+                  type: string
+    ContactRecord:
+      type: object
+      description: >
+        One entry of results[]. Any requested property can be null or absent;
+        email content is NOT guaranteed to be a valid email address. Archived
+        contacts are not returned unless archived=true is passed, which the
+        integration never does.
+      required: [id, properties]
+      properties:
+        id:
+          type: string
+        properties:
+          type: object
+          description: >
+            Always carries createdate, hs_object_id and lastmodifieddate; plus
+            the pinned properties. Every value is a string or null.
+          properties:
+            firstname:
+              type: [string, "null"]
+            lastname:
+              type: [string, "null"]
+            email:
+              type: [string, "null"]
+            jobtitle:
+              type: [string, "null"]
+            company:
+              type: [string, "null"]
+            createdate:
+              type: string
+            lastmodifieddate:
+              type: string
+            hs_object_id:
+              type: string
+          additionalProperties:
+            type: [string, "null"]
+        createdAt:
+          type: string
+        updatedAt:
+          type: string
+        archived:
+          type: boolean
+        url:
+          type: string
+      additionalProperties: true
+    ErrorEnvelope:
+      type: object
+      description: >
+        JSON object with status, message, correlationId and category (verified
+        by live probes for 400 VALIDATION_ERROR and 401 INVALID_AUTHENTICATION).
+        Live-API wins: a 404 on a nonexistent record path returns an HTML body,
+        not this envelope (not called by this integration).
+      required: [message, category]
+      properties:
+        status:
+          type: string
+        message:
+          type: string
+        correlationId:
+          type: string
+        category:
+          type: string
+        context:
+          type: object

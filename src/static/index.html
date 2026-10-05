@@ -154,7 +154,7 @@
           box.innerHTML = '<span class="empty">No integrations found.</span>';
           return;
         }
-        for (const name of discovered) {
+        for (const name of [...discovered].sort((a, b) => a.localeCompare(b))) {
           const btn = document.createElement("button");
           btn.textContent = name;
           btn.title = "Sync My Awesome CRM with " + name;

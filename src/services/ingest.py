@@ -80,7 +80,7 @@ def discover_integrations() -> List[str]:
                     extra={"error": str(e)},
                 )
 
-    return discovered
+    return sorted(discovered, key=str.lower)
 
 
 def run_integration_service(session: Session, integration_name: str) -> dict[str, Any]:

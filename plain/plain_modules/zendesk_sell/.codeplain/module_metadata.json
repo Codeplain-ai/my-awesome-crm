@@ -1,9 +1,0 @@
-{
-    "source_hash": "360f7aac482e7bb03124b39abe3f8153144a4ca7e23fa5b1d1e752d5817ed649",
-    "non_functional_source_hash": "15ef9bf8f35d15e669dd788c57991daf57f5fdb85b526cea6ae7ea53b97a7084",
-    "functionalities": [
-        "- :ZendeskSellContactMapping: maps the `data` object of one `ContactRecord` entry of :ZendeskSellRestAPI: to a :Contact:.",
-        "- :ZendeskSellIntegration: exposes a `fetch(get_stored)` entry point.\n  - It reads the following required environment variable:\n    - `ZENDESK_SELL_ACCESS_TOKEN`\n  - It raises `RuntimeError` naming the environment variable key when it is missing or empty.\n  - It follows :ZendeskSellRestAPI: to authenticate, read every page of contacts, map every entry with :ZendeskSellContactMapping:, and return the mapped :Contact: data dicts.",
-        "- :ZendeskSellIntegration: exports `fetch(get_stored)` from `__init__.py`."
-    ]
-}
