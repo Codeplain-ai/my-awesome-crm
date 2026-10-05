@@ -1,9 +1,0 @@
-{
-    "source_hash": "e5d514ab2dd2df3f322eaffd34822f01dce64005b3bea37ed918f26779debdcd",
-    "non_functional_source_hash": "1a8e78da5f4b6c72a6507dc500fcd010cfc48a098a62e3ca5adb05e2f8ce6d7a",
-    "functionalities": [
-        "- :DynamicsContactMapping: maps one `ContactRecord` of :DynamicsRestAPI: to a :Contact:.",
-        "- :DynamicsIntegration: exposes a `fetch(get_stored)` entry point.\n  - It reads the following required environment variables:\n    - `DYNAMICS_ENDPOINT` - the Dataverse organization base URL, such as `https://your-org.crm4.dynamics.com`\n    - `DYNAMICS_TENANT_ID` - the Microsoft Entra tenant identifier for the Dataverse organization\n    - `DYNAMICS_CLIENT_ID`\n    - `DYNAMICS_CLIENT_SECRET`\n  - It raises `RuntimeError` naming any environment variable key that is missing or empty.\n  - It follows :DynamicsRestAPI: to authenticate, read every page of contacts, map every record with :DynamicsContactMapping:, and return the mapped :Contact: data dicts.",
-        "- :DynamicsIntegration: exports `fetch(get_stored)` from `__init__.py`."
-    ]
-}

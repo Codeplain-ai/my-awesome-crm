@@ -1,9 +1,0 @@
-{
-    "source_hash": "ba2fc8de42be0fe057d767954b995f64e57f874bdf83ad02c41870346c4f203f",
-    "non_functional_source_hash": "8440144a551b781079c6d4405a93574ec3cc265709398f75fa9f02e6122ee7c0",
-    "functionalities": [
-        "- :ZohoContactMapping: maps one `ContactRecord` of :ZohoRestAPI: to a :Contact:.",
-        "- :ZohoIntegration: exposes a `fetch(get_stored)` entry point.\n  - It reads the following required environment variables:\n    - `ZOHO_ACCOUNTS_HOST` - the region-specific Zoho Accounts base URL used to refresh access tokens, such as `https://accounts.zoho.com`\n    - `ZOHO_API_HOST` - the region-specific Zoho CRM API base URL used for data requests, such as `https://www.zohoapis.com`\n    - `ZOHO_CLIENT_ID`\n    - `ZOHO_CLIENT_SECRET`\n    - `ZOHO_REFRESH_TOKEN`\n  - It raises `RuntimeError` naming any environment variable key that is missing or empty.\n  - It follows :ZohoRestAPI: to authenticate, read every page of contacts, treat a no-content response as no records, map every record with :ZohoContactMapping:, and return the mapped :Contact: data dicts.",
-        "- :ZohoIntegration: exports `fetch(get_stored)` from `__init__.py`."
-    ]
-}

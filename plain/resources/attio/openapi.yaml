@@ -1,0 +1,241 @@
+openapi: 3.1.0
+info:
+  title: Attio REST API surface used by the attio integration
+  description: >
+    The exact Attio REST API surface the attio integration calls. Grounded in the
+    provider documentation (docs.attio.com) AND verified against the live workspace
+    (read-only probes). Where docs and the live API disagreed, the live API wins.
+    Attio has no archive or soft-delete concept on people records: the records
+    query returns only live records and a deleted record is simply absent.
+  version: v2
+servers:
+  - url: https://api.attio.com/v2
+    description: >
+      The only environment. Every call goes here; there is no sandbox host and no
+      per-workspace base URL.
+paths:
+  /objects/people/records/query:
+    post:
+      operationId: queryPeople
+      summary: List person records (one page)
+      description: >
+        Read-only despite being a POST. Requires the scopes record_permission:read
+        AND object_configuration:read (live API returns 403 without the latter,
+        even though record_permission:read alone looks sufficient). Pagination is
+        offset based — see components.schemas.QueryRequest. The integration pins
+        limit 500 and a created_at ascending sort so offset paging is stable.
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/QueryRequest"
+      responses:
+        "200":
+          description: One page of person records. An offset past the end returns an empty data array.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/QueryResponse"
+        "400":
+          description: "Invalid body, e.g. limit sent as a string (live probe: code validation_type)."
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+        "401":
+          description: "Invalid or malformed token (live probe: code unauthorized)."
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+        "403":
+          description: "Token lacks a required scope (live probe: code unauthorized, message names the missing scope)."
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+        "404":
+          description: "Unknown object slug (live probe: code not_found)."
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      description: >
+        Authorization: Bearer <token> on every request, where the token is the
+        workspace access token in the environment variable ATTIO_ACCESS_TOKEN.
+        The token never expires and there is no refresh flow. Required scopes:
+        record_permission:read and object_configuration:read.
+  schemas:
+    QueryRequest:
+      type: object
+      properties:
+        limit:
+          type: integer
+          const: 500
+          description: >
+            Pinned page size. Documented default is 500. The live API also
+            accepted 1000; 500 is pinned because it is the documented default.
+        offset:
+          type: integer
+          minimum: 0
+          description: Number of records to skip. Starts at 0 and grows by limit per page.
+        sorts:
+          type: array
+          const:
+            - direction: asc
+              attribute: created_at
+              field: value
+          description: Pinned so offset paging sees a stable order.
+    QueryResponse:
+      type: object
+      description: >
+        Pagination model — there is no cursor and no total. A page with fewer than
+        limit records is the last page; stop there. A page with exactly limit
+        records means request the next offset (the next page may be empty).
+      required: [data]
+      properties:
+        data:
+          type: array
+          items:
+            $ref: "#/components/schemas/PersonRecord"
+    PersonRecord:
+      type: object
+      description: >
+        One person record. Every attribute under values is an ARRAY of value
+        objects, and an attribute with no value is an empty array (live: avatar_url,
+        twitter and the interaction attributes are empty arrays), not null and not
+        absent. Only the first entry of an attribute array is the current value
+        for the single-value attributes this integration reads. Values carry
+        envelope keys (active_from, active_until, created_by_actor,
+        attribute_type) that are API metadata, never business data. Live sample
+        of 13 people was clean (every name, email, job title and company present;
+        phone_numbers empty on 3), but any attribute may be an empty array.
+      required: [id, values]
+      properties:
+        id:
+          type: object
+          required: [record_id]
+          properties:
+            workspace_id:
+              type: string
+            object_id:
+              type: string
+            record_id:
+              type: string
+              description: Stable UUID of the person record.
+        created_at:
+          type: string
+        web_url:
+          type: string
+        values:
+          type: object
+          description: Keys are attribute api slugs, values are arrays of value objects.
+          properties:
+            name:
+              type: array
+              items:
+                $ref: "#/components/schemas/PersonalNameValue"
+            email_addresses:
+              type: array
+              description: Multi-value. Entries are in the order Attio stores them.
+              items:
+                $ref: "#/components/schemas/EmailValue"
+            job_title:
+              type: array
+              items:
+                $ref: "#/components/schemas/TextValue"
+            company:
+              type: array
+              items:
+                $ref: "#/components/schemas/RecordReferenceValue"
+            phone_numbers:
+              type: array
+              items:
+                $ref: "#/components/schemas/PhoneValue"
+          additionalProperties: true
+    PersonalNameValue:
+      type: object
+      properties:
+        attribute_type:
+          const: personal-name
+        first_name:
+          type: [string, "null"]
+        last_name:
+          type: [string, "null"]
+        full_name:
+          type: [string, "null"]
+    EmailValue:
+      type: object
+      properties:
+        attribute_type:
+          const: email-address
+        email_address:
+          type: string
+          description: NOT guaranteed to be a valid email address.
+        original_email_address:
+          type: string
+        email_domain:
+          type: string
+        email_root_domain:
+          type: string
+        email_local_specifier:
+          type: string
+    TextValue:
+      type: object
+      properties:
+        attribute_type:
+          const: text
+        value:
+          type: [string, "null"]
+    PhoneValue:
+      type: object
+      properties:
+        attribute_type:
+          const: phone-number
+        phone_number:
+          type: string
+        original_phone_number:
+          type: string
+        country_code:
+          type: string
+    RecordReferenceValue:
+      type: object
+      description: >
+        A reference only — the company NAME is not inlined. Resolving it needs a
+        separate call to the companies object.
+      properties:
+        attribute_type:
+          const: record-reference
+        target_object:
+          type: string
+          description: Live value was companies.
+        target_record_id:
+          type: string
+    ErrorEnvelope:
+      type: object
+      description: >
+        Verified by live probes for 400 validation_type, 401 unauthorized,
+        403 unauthorized and 404 not_found. 400 adds a validation_errors array.
+      required: [status_code, type, code, message]
+      properties:
+        status_code:
+          type: integer
+        type:
+          type: string
+          description: Live values were auth_error and invalid_request_error.
+        code:
+          type: string
+        message:
+          type: string
+        validation_errors:
+          type: array
+          items:
+            type: object

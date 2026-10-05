@@ -1,4 +1,5 @@
 unittests-script: test_scripts/run_unittests_python.sh
 conformance-tests-script: test_scripts/run_conformance_tests_python.sh
+prepare-environment-script: test_scripts/prepare_environment_python.sh
 template-dir: template
 verbose: true

@@ -1,50 +1,49 @@
 import pytest
-from src.integrations.dynamics.mapping import map_contact_record
+from src.integrations.dynamics.mapping import map_contact
 
-def test_mapping_full_fields():
+def test_map_contact_full():
     raw = {
         "contactid": "guid-123",
-        "fullname": " Jane Doe ",
-        "firstname": "Jane",
-        "lastname": "Doe",
-        "emailaddress1": " JANE@example.com ",
+        "fullname": "  John Doe  ",
+        "emailaddress1": "John.Doe@Example.Com",
         "jobtitle": "Engineer",
         "parentcustomerid_account": {"name": "Acme Corp"},
-        "custom_prop": "val",
-        "@odata.etag": "tag123"
+        "other_field": "value",
+        "@odata.etag": "tag"
     }
-    mapped = map_contact_record(raw)
-    
+    mapped = map_contact(raw)
     assert mapped["external_id"] == "guid-123"
-    assert mapped["full_name"] == "Jane Doe"
-    assert mapped["primary_email"] == "jane@example.com"
+    assert mapped["full_name"] == "John Doe"
+    assert mapped["primary_email"] == "john.doe@example.com"
     assert mapped["job_title"] == "Engineer"
     assert mapped["company_name"] == "Acme Corp"
-    assert mapped["custom_fields"] == {"custom_prop": "val"}
-    assert "fullname" not in mapped["custom_fields"]
-    assert "@odata.etag" not in mapped["custom_fields"]
+    assert mapped["custom_fields"] == {"other_field": "value"}
 
-def test_mapping_name_derivation_fallback():
-    # Fallback to first + last when fullname is missing
+def test_map_contact_name_derivation():
+    # No fullname, use first/last
     raw = {
-        "contactid": "guid-2",
-        "firstname": "John",
+        "contactid": "id2",
+        "firstname": "Jane",
         "lastname": "Smith"
     }
-    mapped = map_contact_record(raw)
-    assert mapped["full_name"] == "John Smith"
+    mapped = map_contact(raw)
+    assert mapped["full_name"] == "Jane Smith"
 
-    # Total fallback to empty string
-    raw_empty = {"contactid": "guid-3"}
-    mapped_empty = map_contact_record(raw_empty)
-    assert mapped_empty["full_name"] == ""
+    # Empty components
+    raw = {"contactid": "id3", "firstname": "OnlyFirst"}
+    assert map_contact(raw)["full_name"] == "OnlyFirst"
 
-def test_mapping_custom_fields_metadata_filtering():
+    # Nothing at all
+    assert map_contact({"contactid": "id4"})["full_name"] == ""
+
+def test_map_contact_nulls():
     raw = {
-        "contactid": "id",
-        "business_value": 42,
-        "@odata.context": "drop-me",
-        "jobtitle@OData.Community.Display.V1.FormattedValue": "drop-me"
+        "contactid": "id5",
+        "fullname": None,
+        "emailaddress1": None,
+        "parentcustomerid_account": None
     }
-    mapped = map_contact_record(raw)
-    assert mapped["custom_fields"] == {"business_value": 42}
+    mapped = map_contact(raw)
+    assert mapped["full_name"] == ""
+    assert mapped["primary_email"] is None
+    assert mapped["company_name"] is None

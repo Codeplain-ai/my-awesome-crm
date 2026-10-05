@@ -1,24 +1,36 @@
 #!/bin/bash
 # Conformance-test runner for an EMBEDDED CRM integration plug-in (Python).
 #
-# Variant: install-inline (no prepare_environment_python.sh exists). This maps
-# the embedded Java conformance flow onto Python:
+# Variant: activate-only. prepare_environment_python.sh runs once per render and
+# builds the venv (host requirements.txt + pytest); this script attaches to it
+# and exits 69 if it is missing. This maps the embedded Java conformance flow
+# onto Python:
 #
-#   Java                                   | Python (this script)
+#   Java                                   | Python
 #   ---------------------------------------|----------------------------------------
-#   mvn install from ROOT (host + impl)     | overlay $1 (generated impl) into the
-#     -> artifact in ~/.m2                  |   host ROOT src/integrations/<name>/,
-#                                           |   install ROOT requirements.txt
-#   cd .tmp/java_conformance && mvn install | stage $2 into a system-temp folder,
-#     -> resolve conformance deps           |   install the conformance suite's deps
-#   mvn test (impl from ~/.m2)              | cd <system temp>/... && pytest
-#                                           |   with PYTHONPATH=ROOT so the ROOT impl
-#                                           |   code is what gets imported
+#   mvn install from ROOT (host + impl)     | prepare: venv + host requirements.txt
+#     -> artifact in ~/.m2                  | this script: snapshot the host into
+#                                           |   the workspace, overlay $1 (generated
+#                                           |   impl) onto its src/integrations/<name>/
+#   cd .tmp/java_conformance && mvn install | stage $2 into the workspace, install
+#     -> resolve conformance deps           |   the suite's own deps (if any) into
+#                                           |   the prepared venv
+#   mvn test (impl from ~/.m2)              | cd <workspace>/conformance && pytest
+#                                           |   with PYTHONPATH=<workspace>/host so
+#                                           |   the snapshot's impl is imported
 #
-# $1 (build folder) is overlaid into the host root per the embedded contract
-# (scoped to the module's own package dir). $2 (conformance tests) is copied
-# into a working folder in the system temp directory and run from there, leaving
-# the authored test tree pristine.
+# Every run works in its OWN isolated workspace in the system temp directory
+# (unique per run), so several renders can run conformance side by side without
+# clobbering each other or the real host tree:
+#
+#   <workspace>/host/         host codebase snapshot + $1 overlaid onto it
+#   <workspace>/conformance/  copy of $2 (the authored test tree stays pristine)
+#
+# The real host tree is never written to, and the workspace is removed on exit.
+# The prepared venv (<temp>/python_conformance_env_<module>_<hash>/.venv, see
+# prepare_environment_python.sh) is shared by the module's runs and never
+# deleted here; prepare owns its lifecycle. $1 is still overlaid on every run
+# because the generated implementation changes after each functional spec.
 #
 #   Usage: run_conformance_tests_python.sh <build_folder> <conformance_tests_folder>
 #
@@ -33,19 +45,24 @@
 # Environment overrides:
 #   HOST_CODEBASE_ROOT  host repo root (default: parent of plain/)
 #   ENV_FILE            path to the required .env file (default: <host root>/.env)
+#
+# Top-level host entries NOT copied into the workspace snapshot: VCS metadata,
+# the venv, secrets (loaded from the real host .env in [6/9] instead), local
+# data, caches, agent tooling, and the ***plain project itself.
 
 set -u
 
 UNRECOVERABLE_ERROR_EXIT_CODE=69
 NO_TESTS_EXIT_CODE=1
+SNAPSHOT_EXCLUDES=".git .venv .env crm.db .pytest_cache .tmp plain .claude .agents .opencode .plainwright"
 
 banner() { printf '\n===== %s =====\n' "$1"; }
 
-# ----- [1/8] Toolchain check ------------------------------------------------
-banner "[1/8] Toolchain check"
+# ----- [1/9] Toolchain check ------------------------------------------------
+banner "[1/9] Toolchain check"
 # The conformance suite runs in its own isolated venv (it installs its own test
 # dependencies, which must not pollute the host environment), but that venv is
-# built from the HOST project's interpreter at $HOST_CODEBASE_ROOT/.venv - the
+# built (by prepare_environment_python.sh) from the HOST project's interpreter at $HOST_CODEBASE_ROOT/.venv - the
 # one scripts/start.sh provisioned. The project's floor is Python >= 3.12 and
 # any interpreter at or above it is fine; what is NOT fine is the tests running
 # on a DIFFERENT interpreter than the host. Selecting one off PATH here did
@@ -65,8 +82,8 @@ fi
 printf "Python interpreter: %s (host venv)\n" "$PYTHON_CMD"
 "$PYTHON_CMD" --version
 
-# ----- [2/8] Argument validation --------------------------------------------
-banner "[2/8] Argument validation"
+# ----- [2/9] Argument validation --------------------------------------------
+banner "[2/9] Argument validation"
 if [ -z "${1:-}" ]; then
     printf "Error: No build folder provided.\n" >&2
     printf "Usage: %s <build_folder> <conformance_tests_folder>\n" "$0" >&2
@@ -90,9 +107,9 @@ if [ ! -d "$TESTS_FOLDER" ]; then
     exit $UNRECOVERABLE_ERROR_EXIT_CODE
 fi
 
-# ----- [3/8] Resolve paths --------------------------------------------------
-banner "[3/8] Resolve paths"
-# PLAIN_DIR / HOST_CODEBASE_ROOT were already resolved (and validated) in [1/8],
+# ----- [3/9] Resolve paths --------------------------------------------------
+banner "[3/9] Resolve paths"
+# PLAIN_DIR / HOST_CODEBASE_ROOT were already resolved (and validated) in [1/9],
 # because the host venv there is derived from them.
 current_dir="$(pwd)"
 ABS_BUILD_FOLDER="$(cd "$BUILD_FOLDER" && pwd)"
@@ -103,12 +120,57 @@ printf "Build folder (impl source):    %s\n" "$ABS_BUILD_FOLDER"
 printf "Conformance tests source:      %s\n" "$ABS_TESTS_FOLDER"
 printf "Host codebase root:            %s\n" "$HOST_CODEBASE_ROOT"
 
-# ----- [4/8] Overlay generated implementation into the host ROOT ------------
+# The prepared environment - keep this derivation identical to
+# prepare_environment_python.sh.
+MODULE_NAME="$(basename "$(dirname "$ABS_BUILD_FOLDER")")"
+PATH_HASH="$("$PYTHON_CMD" -c 'import hashlib, sys; print(hashlib.sha1(sys.argv[1].encode()).hexdigest()[:8])' "$ABS_BUILD_FOLDER")"
+TMP_ROOT="${TMPDIR:-/tmp}"
+PREPARED_ENV="${TMP_ROOT%/}/python_conformance_env_${MODULE_NAME}_${PATH_HASH}"
+VENV_DIR="$PREPARED_ENV/.venv"
+VENV_PY="$VENV_DIR/bin/python"
+printf "Prepared env:                  %s\n" "$PREPARED_ENV"
+
+if [ ! -x "$VENV_PY" ] || [ ! -f "$VENV_DIR/pyvenv.cfg" ] || [ ! -f "$PREPARED_ENV/.prepared" ]; then
+    printf "Error: prepared environment missing or incomplete at %s.\n" "$PREPARED_ENV" >&2
+    printf "       Run prepare_environment_python.sh %s first.\n" "$ABS_BUILD_FOLDER" >&2
+    exit $UNRECOVERABLE_ERROR_EXIT_CODE
+fi
+
+# ----- [4/9] Create the isolated workspace and snapshot the host -----------
+banner "[4/9] Create workspace and snapshot host"
+# The workspace lives in the system temp directory (an absolute path), not
+# inside the project, so no build debris is left in the repo. mktemp makes the
+# name unique per run; $2's basename only labels it (never concatenate the raw
+# argument).
+TMP_ROOT="${TMPDIR:-/tmp}"
+WORKSPACE="$(mktemp -d "${TMP_ROOT%/}/python_conformance_$(basename "$ABS_TESTS_FOLDER").XXXXXX")" || {
+    printf "Error: could not create a workspace in %s\n" "$TMP_ROOT" >&2
+    exit $UNRECOVERABLE_ERROR_EXIT_CODE
+}
+trap 'rm -rf "$WORKSPACE"' EXIT
+HOST_SNAPSHOT="$WORKSPACE/host"
+WORKING_FOLDER="$WORKSPACE/conformance"
+mkdir -p "$HOST_SNAPSHOT" "$WORKING_FOLDER"
+printf "Workspace:     %s\n" "$WORKSPACE"
+printf "Host snapshot: %s\n" "$HOST_SNAPSHOT"
+
+shopt -s dotglob nullglob
+for entry in "$HOST_CODEBASE_ROOT"/*; do
+    name="$(basename "$entry")"
+    case " $SNAPSHOT_EXCLUDES " in *" $name "*) continue ;; esac
+    cp -R "$entry" "$HOST_SNAPSHOT"/ || {
+        printf "Error: failed to copy %s into host snapshot %s\n" "$entry" "$HOST_SNAPSHOT" >&2
+        exit $UNRECOVERABLE_ERROR_EXIT_CODE
+    }
+done
+shopt -u dotglob nullglob
+
+# ----- [5/9] Overlay generated implementation onto the host snapshot --------
 # Mirrors the Java "mvn install from root with all code" step: put the freshly
 # generated implementation where the conformance suite will import it from
-# (root's src/). Scoped to the module's own integration package dir(s) only -
-# never the host's top-level src/ or tests/.
-banner "[4/8] Overlay implementation into host root"
+# (the snapshot's src/). Scoped to the module's own integration package dir(s)
+# of the snapshot only.
+banner "[5/9] Overlay implementation onto host snapshot"
 STAGED_ANY=0
 for sub in src tests; do
     pkg_root="$ABS_BUILD_FOLDER/$sub/integrations"
@@ -117,8 +179,8 @@ for sub in src tests; do
         [ -d "$pkg" ] || continue
         name="$(basename "$pkg")"
         rel="$sub/integrations/$name"
-        dest="$HOST_CODEBASE_ROOT/$rel"
-        printf "Staging %s into host root\n" "$rel"
+        dest="$HOST_SNAPSHOT/$rel"
+        printf "Staging %s into host snapshot\n" "$rel"
         rm -rf "$dest"
         mkdir -p "$dest"
         cp -R "$pkg"/. "$dest"/
@@ -130,12 +192,12 @@ if [ "$STAGED_ANY" -ne 1 ]; then
     exit $UNRECOVERABLE_ERROR_EXIT_CODE
 fi
 
-# ----- [5/8] Provider credentials (live run) --------------------------------
+# ----- [6/9] Provider credentials (live run) --------------------------------
 # A .env at the project root is REQUIRED. This step only guarantees the file
 # exists and loads it into the environment - it is integration-agnostic and
 # never validates any specific secret by name. Each integration validates the
 # credentials it needs at call time; the live run surfaces a missing one.
-banner "[5/8] Provider credentials"
+banner "[6/9] Provider credentials"
 ENV_FILE="${ENV_FILE:-$HOST_CODEBASE_ROOT/.env}"
 if [ ! -f "$ENV_FILE" ]; then
     printf "Error: credentials file not found: %s\n" "$ENV_FILE" >&2
@@ -160,75 +222,37 @@ while IFS= read -r line || [ -n "$line" ]; do
     fi
 done < "$ENV_FILE"
 
-# ----- [6/8] Stage conformance tests into a system-temp working folder ------
-banner "[6/8] Stage conformance tests into working folder"
-# The working folder lives in the system temp directory (an absolute path), not
-# inside the project, so no build debris is left in the repo. $2 arrives as an
-# absolute path from current renderers, so only its basename is used to name the
-# folder (never concatenate the raw argument).
-WORKING_FOLDER="/tmp/python_conformance_$(basename "$ABS_TESTS_FOLDER")"
+# ----- [7/9] Stage conformance tests into the workspace ---------------------
+banner "[7/9] Stage conformance tests into working folder"
+# The working folder is freshly created inside this run's workspace, so no
+# stale files from a previous run can be collected alongside this run's tests.
 printf "Working folder: %s\n" "$WORKING_FOLDER"
-# Remove the folder itself in one shot rather than deleting its contents with
-# `find -exec rm -rf {} +`: on macOS's BSD find, that traversal races with the
-# rm -rf calls it spawns (a batched rm can delete a subtree - e.g. a nested
-# .venv from a prior run - while find is still descending into it), which
-# aborts with "fts_read: No such file or directory" partway through and
-# leaves stale files from a previous conformance run behind to be picked up
-# by pytest alongside the current run's freshly-copied tests.
-rm -rf "$WORKING_FOLDER"
-mkdir -p "$WORKING_FOLDER"
 cp -R "$ABS_TESTS_FOLDER"/. "$WORKING_FOLDER"/
 
-# ----- [7/8] Install dependencies (isolated venv inside working folder) -----
-banner "[7/8] Install dependencies"
+# ----- [8/9] Attach to the prepared venv ------------------------------------
+banner "[8/9] Attach to prepared venv"
+# Host requirements and pytest were installed by prepare_environment_python.sh.
+# Only the suite's own deps vary per functional spec; they go into the prepared
+# venv, where pip skips anything already satisfied.
 start_time=$(date +%s)
-VENV_DIR="$WORKING_FOLDER/.venv"
-if ! "$PYTHON_CMD" -m venv "$VENV_DIR"; then
-    printf "Error: failed to create virtual environment at %s\n" "$VENV_DIR" >&2
-    exit $UNRECOVERABLE_ERROR_EXIT_CODE
-fi
-VENV_PY="$VENV_DIR/bin/python"
-
-# Some hosts create a venv without pip (a stripped Python where ensurepip is
-# missing, or an incomplete system python3-venv package). pip must be present
-# inside the venv; try to bootstrap it with ensurepip, and if it still is not
-# available, fail fast with 69 rather than dying later with an opaque error.
-if ! "$VENV_PY" -m pip --version >/dev/null 2>&1; then
-    printf "pip not found in venv; attempting to bootstrap it with ensurepip\n" >&2
-    "$VENV_PY" -m ensurepip --upgrade --default-pip >/dev/null 2>&1
-fi
-if ! "$VENV_PY" -m pip --version >/dev/null 2>&1; then
-    printf "Error: pip is not available in the venv at %s and could not be bootstrapped.\n" "$VENV_DIR" >&2
-    printf "       Install the platform's Python venv/pip support (e.g. the python3-venv package) and retry.\n" >&2
-    exit $UNRECOVERABLE_ERROR_EXIT_CODE
-fi
-
-"$VENV_PY" -m pip install --upgrade pip || exit $?
-
-# Host runtime deps ("from src") so the root implementation imports cleanly.
-if [ -f "$HOST_CODEBASE_ROOT/requirements.txt" ]; then
-    printf "Installing host requirements from %s\n" "$HOST_CODEBASE_ROOT/requirements.txt"
-    "$VENV_PY" -m pip install -r "$HOST_CODEBASE_ROOT/requirements.txt" || exit $?
-fi
-# Conformance suite's own deps ("from conformance"), if it ships any.
+printf "Using prepared venv %s\n" "$VENV_DIR"
 if [ -f "$WORKING_FOLDER/requirements.txt" ]; then
     printf "Installing conformance-suite requirements\n"
     "$VENV_PY" -m pip install -r "$WORKING_FOLDER/requirements.txt" || exit $?
 fi
-"$VENV_PY" -m pip install pytest || exit $?
 
 end_time=$(date +%s)
 printf "Requirements setup completed in %s seconds\n" "$((end_time - start_time))"
 
-# ----- [8/8] Run conformance tests LIVE from working folder, impl from ROOT -
-banner "[8/8] Run conformance tests (live provider)"
+# ----- [9/9] Run conformance tests LIVE, impl from the host snapshot --------
+banner "[9/9] Run conformance tests (live provider)"
 cd "$WORKING_FOLDER" 2>/dev/null || {
     printf "Error: could not enter working folder %s\n" "$WORKING_FOLDER" >&2
     exit $UNRECOVERABLE_ERROR_EXIT_CODE
 }
-# PYTHONPATH=ROOT => `from src.integrations.<name> import ...` resolves to the
-# implementation code in the host root, not anything under the working folder.
-export PYTHONPATH="$HOST_CODEBASE_ROOT${PYTHONPATH:+:$PYTHONPATH}"
+# PYTHONPATH=snapshot => `from src.integrations.<name> import ...` resolves to
+# the implementation code in this run's host snapshot, never the real host tree.
+export PYTHONPATH="$HOST_SNAPSHOT${PYTHONPATH:+:$PYTHONPATH}"
 TEST_CMD=("$VENV_PY" -m pytest \
           -vv \
           -rA \
@@ -241,7 +265,7 @@ TEST_CMD=("$VENV_PY" -m pytest \
           --log-cli-level=DEBUG \
           --import-mode=importlib \
           -p no:cacheprovider \
-          --basetemp="$WORKING_FOLDER/.pytest_tmp" \
+          --basetemp="$WORKSPACE/.pytest_tmp" \
           "$WORKING_FOLDER")
 
 printf "Now in:       %s\n" "$(pwd)"
@@ -281,6 +305,6 @@ if [ "$exit_code" -ne 0 ] || printf '%s' "$summary_line" | grep -qiE "[0-9]+ (fa
 fi
 
 printf "\nConformance run passed.\n"
-printf "Summary: variant=install-inline cmd='%s' exit=%s current_dir=%s working_folder=%s\n" \
+printf "Summary: variant=activate-only cmd='%s' exit=%s current_dir=%s working_folder=%s\n" \
     "${TEST_CMD[*]}" "$exit_code" "$current_dir" "$WORKING_FOLDER"
 exit "$exit_code"
