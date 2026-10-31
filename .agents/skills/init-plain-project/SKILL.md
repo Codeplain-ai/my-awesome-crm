@@ -6,23 +6,23 @@ description: >-
   then scaffolds a template import module (with base implementation reqs and
   test reqs), a stub top-level module, the unit testing script, and
   (optionally) the conformance and prepare-environment scripts plus a
-  config.yaml. Does NOT run `codeplain --dry-run`. Use when the user wants a
+  config.yaml. Does NOT run `plain-healthcheck`. Use when the user wants a
   quick project skeleton to start writing functional specs against, without
   the full forge-plain interview.
 ---
 
 # Init Plain Project
 
-Always use the skill `load-plain-reference` to retrieve the ***plain syntax rules — but only if you haven't done so yet.
+**Load the rules first.** Before you read, edit, or write any `.plain` file, invoke the `load-plain-reference` skill and read the rule files it routes you to. Skip this only if `load-plain-reference` already ran in this conversation.
 
 ## Scope
 
-This skill is intentionally **minimal**. It produces a runnable project skeleton — not a complete spec. **No `***definitions***` sections are written by this skill — not in the template module, not in the top module.** No functional specs, no concepts, no acceptance tests, no dry-run validation. The user will fill those in afterwards with `add-feature`, `add-concept`, `add-functional-spec`, etc.
+This skill is intentionally **minimal**. It produces a runnable project skeleton — not a complete spec. **No `***definitions***` sections are written by this skill — not in the template module, not in the top module.** No functional specs, no concepts, no test plain files, no validation. The user will fill those in afterwards with `add-feature`, `add-concept`, `add-functional-spec`, etc.
 
 What this skill writes:
 
 - `template/base.plain` — an import module with the project's base `***implementation reqs***` and `***test reqs***`.
-- `<project>.plain` — a top-level module that imports `base`. Frontmatter only — no body sections. The user adds `***functional specs***` later.
+- `<project>.plain` — a top-level module that imports `base`. Frontmatter only — no body sections. The user adds `***functional specs***` later, each with its test plain file.
 - `test_scripts/run_unittests_<lang>.<sh|ps1>` — always.
 - `test_scripts/run_conformance_tests_<lang>.<sh|ps1>` — only if conformance testing is enabled.
 - `test_scripts/prepare_environment_<lang>.<sh|ps1>` — only if conformance testing is enabled **and** the user opts in.
@@ -30,8 +30,8 @@ What this skill writes:
 
 What this skill does **not** do:
 
-- Run `codeplain --dry-run` or `plain-healthcheck`.
-- Author concepts, functional specs, or acceptance tests.
+- Run `plain-healthcheck`.
+- Author concepts, functional specs, or test plain files.
 - Probe the host environment (`check-plain-env` is a separate step the user can run later).
 
 ## Workflow
@@ -51,7 +51,7 @@ Follow up with a free-form prompt for anything the options didn't cover (e.g. sp
 Use **AskUserQuestion** for one tight batch covering:
 
 - **Unit testing framework** — propose the canonical one for the chosen language (pytest, Jest, Go `testing`, JUnit, ...) and let the user override.
-- **Conformance testing** — enabled or not. If the user is unsure, briefly explain it adds a `run_conformance_tests` script and per-spec acceptance tests later.
+- **Conformance testing** — enabled or not. If the user is unsure, briefly explain it adds a `run_conformance_tests` script and, for every functionality added later, a test plain file with conformance scenarios.
 - **Prepare-environment script** — only ask this if conformance testing was enabled in the previous question. Generate one or skip. Recommend "yes" when dependencies need installing (most stacks); recommend "skip" when there is genuinely nothing to set up. If conformance testing is disabled, skip this question entirely and do not generate a prepare-environment script.
 
 ### 3. Author `template/base.plain`
@@ -111,15 +111,15 @@ template_dir: template
 
 Always include `template_dir: template` because the project has a template import module from step 3. Use `.sh` on macOS/Linux and `.ps1` on Windows, matching whatever the implement-* skills produced.
 
-Do **not** invoke `init-config-file` or `plain-healthcheck` here — keeping this skill light is the whole point. The user can run them later if they want a strict canonicalization or a dry-run.
+Do **not** invoke `init-config-file` or `plain-healthcheck` here — keeping this skill light is the whole point. The user can run them later if they want a strict canonicalization or validation.
 
 ### 7. Recap
 
 Tell the user what was created and what's next:
 
 - Files written: `template/base.plain`, `<project>.plain`, the test scripts, `config.yaml`.
-- Suggested next steps: add concepts with `add-concept`, add functional specs with `add-functional-spec` or `add-functional-specs`, or jump straight into `add-feature`.
-- Mention that `codeplain <project>.plain --dry-run` has not been run — they can run `plain-healthcheck` when they want validation.
+- Suggested next steps: add concepts with `add-concept`, add functional specs with `add-functional-spec` or `add-functional-specs` (each new functionality gets its test plain file when conformance testing is enabled; an empty `***conformance tests***` section holds the comment `> add conformance test scenarios here`), or jump straight into `add-feature`.
+- Mention that the project has not been validated — they can run `plain-healthcheck` when they want validation.
 
 ## Validation checklist
 

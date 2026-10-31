@@ -9,7 +9,7 @@ description: >-
 
 # Add Test Requirement
 
-Always use the skill `load-plain-reference` to retrieve the ***plain syntax rules — but only if you haven't done so yet.
+**Load the rules first.** Before you read, edit, or write any `.plain` file, invoke the `load-plain-reference` skill and read the rule files it routes you to. Skip this only if `load-plain-reference` already ran in this conversation.
 
 ## Workflow
 
@@ -33,7 +33,7 @@ Test reqs specify how **conformance tests** should be written and run. Common co
 ## What Does NOT Belong Here
 
 - **Unit test guidance** — that goes in `***implementation reqs***`
-- **Acceptance tests** — those are nested under individual functional specs in `***functional specs***`
+- **Test scenarios** — conformance and acceptance scenarios live in test plain files, written with `add-test-scenarios` (see `test-plain-files.md`)
 - **Behavioral requirements** — those go in `***functional specs***`
 - **Technology choices for the implementation** — those go in `***implementation reqs***`
 
@@ -42,8 +42,8 @@ Test reqs specify how **conformance tests** should be written and run. Common co
 | Test Type | Where to Specify | Purpose |
 |-----------|-----------------|---------|
 | Unit tests | `***implementation reqs***` | Test individual functionalities in isolation |
-| Conformance tests | `***test reqs***` | Verify implementation conforms to the full spec |
-| Acceptance tests | `***acceptance tests***` under a functional spec | Verify a specific functional spec |
+| Conformance tests | how: `***test reqs***`; what: `***conformance tests***` of the test plain file | Verify the expected use of one functionality, its main path |
+| Acceptance tests | how: `***test reqs***`; what: `***acceptance tests***` of the test plain file | Verify one functionality under use that is not expected: invalid parameters, wrong or missing authentication, missing data |
 
 ## Format
 

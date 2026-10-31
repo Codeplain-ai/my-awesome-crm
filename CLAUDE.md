@@ -57,7 +57,7 @@ cannot do itself.
 
 When authoring, editing, reviewing, or debugging any `.plain` content, **do not use the plan tool**
 and do not produce a written plan. Spec authoring is governed end-to-end by the rules in
-`.claude/rules/` and the lessons in this file — that workflow is the plan. Work the rules directly
+`.claude/skills/load-plain-reference/rules/` and the lessons in this file — that workflow is the plan. Work the rules directly
 instead of drafting a separate one.
 
 ## First step: create the empty `.plain` module with its frontmatter
@@ -263,8 +263,8 @@ mandates that an error message "names" something, pin the identifier space and g
   not the values. Never print or paste the values themselves into a spec, summary, or commit —
   reference them by env-var name only.
 - **Keep `verbose: true` in `plain/config.yaml`.** codeplain's `--verbose` defaults to *disabled*;
-  without the config pin the log carries no test-script output, which silently blinds both the
-  post-render mining below and `run-codeplain`'s spec-deviation classification.
+  without the config pin the log carries no test-script output, which silently blinds the
+  post-render mining below.
 - **After every render, mine `conformance_tests/<module>/.memory/conformance_test_memory/*.json`**
   and the log for `Specification ambiguity detected` blocks. Every RESOLVED entry and ambiguity
   suggestion is a render-time incident whose lesson gets folded into the specs and this file.
@@ -417,7 +417,31 @@ SessionStart-hook output limit does **not** apply to CLAUDE.md imports. They exp
 at launch, so the context never drifts from source. The dynamic existing-integrations list is added
 separately by `.claude/hooks/load-integration-context.sh`. Paths are relative to this file (repo root).
 
+The ***plain authoring rules ship inside the `load-plain-reference` skill (`rules/`), which no longer
+loads them natively, so every rule file is imported here. When plain-forge is updated, re-sync this
+list with `ls .claude/skills/load-plain-reference/rules/*.md`.
+
 @.claude/skills/load-plain-reference/SKILL.md
+@.claude/skills/load-plain-reference/rules/bullet-continuation.md
+@.claude/skills/load-plain-reference/rules/concise-specs-examples.md
+@.claude/skills/load-plain-reference/rules/concise-specs-integration-examples.md
+@.claude/skills/load-plain-reference/rules/concise-specs.md
+@.claude/skills/load-plain-reference/rules/definitions.md
+@.claude/skills/load-plain-reference/rules/exported-concepts.md
+@.claude/skills/load-plain-reference/rules/func-specs.md
+@.claude/skills/load-plain-reference/rules/impl-reqs.md
+@.claude/skills/load-plain-reference/rules/import-modules.md
+@.claude/skills/load-plain-reference/rules/integration-embedded-testing.md
+@.claude/skills/load-plain-reference/rules/integration-embedded.md
+@.claude/skills/load-plain-reference/rules/integration-standalone.md
+@.claude/skills/load-plain-reference/rules/integrations.md
+@.claude/skills/load-plain-reference/rules/linked-resources.md
+@.claude/skills/load-plain-reference/rules/module-structure.md
+@.claude/skills/load-plain-reference/rules/required-concepts.md
+@.claude/skills/load-plain-reference/rules/requires-modules.md
+@.claude/skills/load-plain-reference/rules/semantic-ids.md
+@.claude/skills/load-plain-reference/rules/test-plain-files.md
+@.claude/skills/load-plain-reference/rules/test-reqs.md
 @README.md
 @plain/salesforce.plain
 @plain/template/crm_common.plain
