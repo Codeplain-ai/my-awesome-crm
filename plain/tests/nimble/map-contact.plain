@@ -1,0 +1,24 @@
+---
+module: nimble
+func_id: map-contact
+---
+
+***conformance tests***
+
+# map-full-contact
+:NimbleContactMapping: maps a `ContactRecord` of :NimbleRestAPI: with `id` `n1`, `record_type` `person`, and `fields` `first name` `Ada`, `last name` `Lovelace`, `email` ` Ada@Example.COM `, `title` `Engineer` and `company` `Analytical Engines`, each as a one-entry value list to a :Contact:.
+- `provider_id` is `nimble`, `external_id` is `n1`, `full_name` is `Ada Lovelace`.
+- `primary_email` is `ada@example.com`, `job_title` is `Engineer`, `company_name` is `Analytical Engines`.
+- `custom_fields` is `{"record_type": "person"}`.
+
+# name-from-email
+:NimbleContactMapping: maps a `ContactRecord` of :NimbleRestAPI: whose `fields` hold only `email` ` Bob@Example.com ` to a :Contact:.
+- `full_name` is `Bob@Example.com`.
+- `primary_email` is `bob@example.com`.
+
+# name-from-company
+:NimbleContactMapping: maps a `ContactRecord` of :NimbleRestAPI: whose `fields` hold only `company` `Analytical Engines` to a :Contact:.
+- `full_name` is `Analytical Engines`.
+- `primary_email` is `null`.
+
+***acceptance tests***

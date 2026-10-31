@@ -1,0 +1,26 @@
+---
+module: salesforce
+func_id: map-contact
+---
+
+***conformance tests***
+
+# map-full-contact
+:SalesforceContactMapping: maps a `ContactRecord` of :SalesforceRestAPI: with `Id` `003000000000001AAA`, `Name` `Ada Lovelace`, `Email` ` Ada@Example.COM `, `Title` `Engineer`, `Account` with `Name` `Analytical Engines`, and `attributes` of `type` `Contact` to a :Contact:.
+- `provider_id` is `salesforce`, `external_id` is `003000000000001AAA`, `full_name` is `Ada Lovelace`.
+- `primary_email` is `ada@example.com`, `job_title` is `Engineer`, `company_name` is `Analytical Engines`.
+- `custom_fields` is `{}`.
+
+# name-from-parts
+:SalesforceContactMapping: maps a `ContactRecord` of :SalesforceRestAPI: with a `null` `Name`, `FirstName` `Ada` and `LastName` `Lovelace` to a :Contact:.
+- `full_name` is `Ada Lovelace`.
+
+# null-account
+:SalesforceContactMapping: maps a `ContactRecord` of :SalesforceRestAPI: with `Account` `null` to a :Contact:.
+- `company_name` is `null`.
+
+# select-custom-fields
+:SalesforceContactMapping: maps a `ContactRecord` of :SalesforceRestAPI: with `Department` `Research`, `LeadSource` `Web`, `attributes` and an `Account` object to a :Contact:.
+- `custom_fields` is `{"Department": "Research", "LeadSource": "Web"}`.
+
+***acceptance tests***

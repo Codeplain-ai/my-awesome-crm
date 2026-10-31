@@ -1,0 +1,23 @@
+---
+module: zendesk_sell
+func_id: map-contact
+---
+
+***conformance tests***
+
+# map-full-contact
+:ZendeskSellContactMapping: maps the `data` object of a `ContactRecord` entry of :ZendeskSellRestAPI: with the number `9001` as `id`, `is_organization` `false`, `first_name` `Ada`, `last_name` `Lovelace`, `email` ` Ada@Example.COM `, `title` `Engineer`, `organization_name` `Analytical Engines`, `created_at` `2024-01-02`, `updated_at` `2024-02-03` and a `custom_fields` map `{"Industry": "Math"}` to a :Contact:.
+- `provider_id` is `zendesk_sell`, `external_id` is the string `9001`, `full_name` is `Ada Lovelace`.
+- `primary_email` is `ada@example.com`, `job_title` is `Engineer`, `company_name` is `Analytical Engines`.
+- `custom_fields` is `{"Industry": "Math", "created_at": "2024-01-02", "updated_at": "2024-02-03", "is_organization": false}`.
+
+# organization-name
+:ZendeskSellContactMapping: maps the `data` object of a `ContactRecord` entry of :ZendeskSellRestAPI: with `is_organization` `true`, `name` `Analytical Engines Ltd` and `null` `first_name` and `last_name` to a :Contact:.
+- `full_name` is `Analytical Engines Ltd`.
+
+# name-from-email
+:ZendeskSellContactMapping: maps the `data` object of a `ContactRecord` entry of :ZendeskSellRestAPI: with `is_organization` `false`, no name fields and `email` ` Bob@Example.com ` to a :Contact:.
+- `full_name` is `Bob@Example.com`.
+- `primary_email` is `bob@example.com`.
+
+***acceptance tests***

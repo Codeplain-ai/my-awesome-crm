@@ -1,0 +1,11 @@
+---
+module: streak
+func_id: export-fetch
+---
+
+***conformance tests***
+
+# discover-streak
+The host's integration discovery returns a list that contains `streak`.
+
+***acceptance tests***

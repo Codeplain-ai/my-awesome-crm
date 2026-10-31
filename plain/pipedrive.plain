@@ -15,13 +15,16 @@ description: "Pipedrive Integration plug-in for the CRM backend."
 
 ***functional specs***
 
-- :PipedriveContactMapping: maps one `ContactRecord` of :PipedriveRestAPI: to a :Contact:.
+# map-contact
+:PipedriveContactMapping: maps one `ContactRecord` of :PipedriveRestAPI: to a :Contact:.
 
-- :PipedriveIntegration: exposes a `fetch(get_stored)` entry point.
-  - It reads the following required environment variables:
-    - `PIPEDRIVE_API_TOKEN`
-    - `PIPEDRIVE_COMPANY_DOMAIN` - the account's company subdomain, such as `acme` for `https://acme.pipedrive.com`
-  - It raises `RuntimeError` naming any environment variable key that is missing or empty.
-  - It follows :PipedriveRestAPI: to authenticate, read every page of persons, map every record with :PipedriveContactMapping:, and return the mapped :Contact: data dicts.
+# fetch-entry-point
+:PipedriveIntegration: exposes a `fetch(get_stored)` entry point.
+- It reads the following required environment variables:
+  - `PIPEDRIVE_API_TOKEN`
+  - `PIPEDRIVE_COMPANY_DOMAIN` - the account's company subdomain, such as `acme` for `https://acme.pipedrive.com`
+- It raises `RuntimeError` naming any environment variable key that is missing or empty.
+- It follows :PipedriveRestAPI: to authenticate, read every page of persons, map every record with :PipedriveContactMapping:, and return the mapped :Contact: data dicts.
 
-- :PipedriveIntegration: exports `fetch(get_stored)` from `__init__.py`.
+# export-fetch
+:PipedriveIntegration: exports `fetch(get_stored)` from `__init__.py`.

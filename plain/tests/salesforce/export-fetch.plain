@@ -1,0 +1,11 @@
+---
+module: salesforce
+func_id: export-fetch
+---
+
+***conformance tests***
+
+# discover-salesforce
+The host's integration discovery returns a list that contains `salesforce`.
+
+***acceptance tests***

@@ -1,0 +1,11 @@
+---
+module: dynamics
+func_id: export-fetch
+---
+
+***conformance tests***
+
+# discover-dynamics
+The host's integration discovery returns a list that contains `dynamics`.
+
+***acceptance tests***

@@ -1,0 +1,23 @@
+---
+module: streak
+func_id: map-contact
+---
+
+***conformance tests***
+
+# map-full-contact
+:StreakContactMapping: maps a `ContactRecord` of :StreakRestAPI: with `key` `key-1`, `fullName` `Ada Lovelace`, `emailAddresses` ` Ada@Example.COM ` and `other@example.com`, `title` `Engineer`, `creationTimestamp` `1700000000000`, `lastSavedTimestamp` `1700000100000` and `teamKey` `team-1` to a :Contact:.
+- `provider_id` is `streak`, `external_id` is `key-1`, `full_name` is `Ada Lovelace`.
+- `primary_email` is `ada@example.com`, `job_title` is `Engineer`, `company_name` is `null`.
+- `custom_fields` is `{"creationTimestamp": 1700000000000, "lastSavedTimestamp": 1700000100000}`.
+
+# name-from-parts
+:StreakContactMapping: maps a `ContactRecord` of :StreakRestAPI: with a `null` `fullName`, `givenName` `Ada` and `familyName` `Lovelace` to a :Contact:.
+- `full_name` is `Ada Lovelace`.
+
+# name-from-email
+:StreakContactMapping: maps a `ContactRecord` of :StreakRestAPI: with no name fields and `emailAddresses` an empty string followed by ` Bob@Example.com ` to a :Contact:.
+- `full_name` is `Bob@Example.com`.
+- `primary_email` is `bob@example.com`.
+
+***acceptance tests***

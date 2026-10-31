@@ -1,0 +1,23 @@
+---
+module: sugarcrm
+func_id: map-contact
+---
+
+***conformance tests***
+
+# map-full-contact
+:SugarCrmContactMapping: maps a `ContactRecord` of :SugarCrmRestAPI: with `id` `s-1`, `full_name` `Ada Lovelace`, `email` entries `first@example.com` (not primary) and ` Ada@Example.COM ` (primary), `title` `Engineer`, `account_name` `Analytical Engines`, `date_entered` `2024-01-02`, `date_modified` `2024-02-03` and `_module` `Contacts` to a :Contact:.
+- `provider_id` is `sugarcrm`, `external_id` is `s-1`, `full_name` is `Ada Lovelace`.
+- `primary_email` is `ada@example.com`, `job_title` is `Engineer`, `company_name` is `Analytical Engines`.
+- `custom_fields` is `{"date_entered": "2024-01-02", "date_modified": "2024-02-03"}`.
+
+# name-from-parts
+:SugarCrmContactMapping: maps a `ContactRecord` of :SugarCrmRestAPI: with empty `full_name` and `name`, `first_name` `Ada` and `last_name` `Lovelace` to a :Contact:.
+- `full_name` is `Ada Lovelace`.
+
+# email-from-email1
+:SugarCrmContactMapping: maps a `ContactRecord` of :SugarCrmRestAPI: with no name fields, an empty `email` array and `email1` ` Bob@Example.com ` to a :Contact:.
+- `primary_email` is `bob@example.com`.
+- `full_name` is `Bob@Example.com`.
+
+***acceptance tests***

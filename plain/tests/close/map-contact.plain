@@ -1,0 +1,23 @@
+---
+module: close
+func_id: map-contact
+---
+
+***conformance tests***
+
+# map-full-contact
+:CloseContactMapping: maps a `ContactRecord` of :CloseRestAPI: with `id` `cont_1`, `name` `Ada Lovelace`, `title` `Engineer`, first email ` Ada@Example.COM `, `lead_id` `lead_1`, `organization_id` `orga_1`, `date_created` `2024-01-02` and `date_updated` `2024-02-03` to a :Contact:.
+- `provider_id` is `close`, `external_id` is `cont_1`, `full_name` is `Ada Lovelace`.
+- `primary_email` is `ada@example.com`, `job_title` is `Engineer`, `company_name` is `null`.
+- `custom_fields` is `{"lead_id": "lead_1", "organization_id": "orga_1", "date_created": "2024-01-02", "date_updated": "2024-02-03"}`.
+
+# name-from-email
+:CloseContactMapping: maps a `ContactRecord` of :CloseRestAPI: with no `name` and a first email ` Bob@Example.com ` to a :Contact:.
+- `full_name` is `Bob@Example.com`.
+- `primary_email` is `bob@example.com`.
+
+# select-custom-fields
+:CloseContactMapping: maps a `ContactRecord` of :CloseRestAPI: with `id` `cont_2`, `lead_id` `lead_2`, `display_name` `Ada L.`, `created_by` `user_1` and no `organization_id`, `date_created` or `date_updated` to a :Contact:.
+- `custom_fields` is `{"lead_id": "lead_2"}`.
+
+***acceptance tests***

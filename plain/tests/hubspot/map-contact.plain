@@ -1,0 +1,24 @@
+---
+module: hubspot
+func_id: map-contact
+---
+
+***conformance tests***
+
+# map-full-contact
+:HubSpotContactMapping: maps a `ContactRecord` of :HubSpotRestAPI: with `id` `501` and `properties` `firstname` `Ada`, `lastname` `Lovelace`, `email` ` Ada@Example.COM `, `jobtitle` `Engineer` and `company` `Analytical Engines` to a :Contact:.
+- `provider_id` is `hubspot`, `external_id` is `501`, `full_name` is `Ada Lovelace`.
+- `primary_email` is `ada@example.com`, `job_title` is `Engineer`, `company_name` is `Analytical Engines`.
+- `custom_fields` is `{}`.
+
+# name-from-one-part
+:HubSpotContactMapping: maps a `ContactRecord` of :HubSpotRestAPI: with `firstname` `Ada` and a `null` `lastname` to a :Contact:.
+- `full_name` is `Ada`.
+
+# map-empty-properties
+:HubSpotContactMapping: maps a `ContactRecord` of :HubSpotRestAPI: with `id` `502` and every property `null` to a :Contact:.
+- `full_name` is `""`.
+- `primary_email`, `job_title` and `company_name` are `null`.
+- `custom_fields` is `{}`.
+
+***acceptance tests***

@@ -1,0 +1,11 @@
+---
+module: zoho
+func_id: export-fetch
+---
+
+***conformance tests***
+
+# discover-zoho
+The host's integration discovery returns a list that contains `zoho`.
+
+***acceptance tests***
