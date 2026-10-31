@@ -15,12 +15,15 @@ description: "HubSpot Integration plug-in for the CRM backend."
 
 ***functional specs***
 
-- :HubSpotContactMapping: maps one `ContactRecord` of :HubSpotRestAPI: to a :Contact:.
+# map-contact
+:HubSpotContactMapping: maps one `ContactRecord` of :HubSpotRestAPI: to a :Contact:.
 
-- :HubSpotIntegration: exposes a `fetch(get_stored)` entry point.
-  - It reads the required environment variable `HUBSPOT_ACCESS_TOKEN`, a private app access token.
-  - It raises `RuntimeError` naming any environment variable key that is missing or empty (e.g. `HUBSPOT_ACCESS_TOKEN`).
-  - It follows :HubSpotRestAPI: to authenticate, read every page of contacts, map every record with :HubSpotContactMapping:, and return the mapped :Contact: data dicts.
-  - Archived contacts are not requested, so none is returned.
+# fetch-entry-point
+:HubSpotIntegration: exposes a `fetch(get_stored)` entry point.
+- It reads the required environment variable `HUBSPOT_ACCESS_TOKEN`, a private app access token.
+- It raises `RuntimeError` naming any environment variable key that is missing or empty (e.g. `HUBSPOT_ACCESS_TOKEN`).
+- It follows :HubSpotRestAPI: to authenticate, read every page of contacts, map every record with :HubSpotContactMapping:, and return the mapped :Contact: data dicts.
+- Archived contacts are not requested, so none is returned.
 
-- :HubSpotIntegration: exports `fetch(get_stored)` from `__init__.py`.
+# export-fetch
+:HubSpotIntegration: exports `fetch(get_stored)` from `__init__.py`.

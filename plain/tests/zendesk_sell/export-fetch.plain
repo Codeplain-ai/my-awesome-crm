@@ -1,0 +1,11 @@
+---
+module: zendesk_sell
+func_id: export-fetch
+---
+
+***conformance tests***
+
+# discover-zendesk-sell
+The host's integration discovery returns a list that contains `zendesk_sell`.
+
+***acceptance tests***

@@ -1,0 +1,26 @@
+---
+module: copper
+func_id: map-contact
+---
+
+***conformance tests***
+
+# map-full-contact
+:CopperContactMapping: maps a `ContactRecord` of :CopperRestAPI: with the number `27140442` as `id`, `name` `Ada Lovelace`, `title` `Engineer`, `company_name` `Analytical Engines`, one email ` Ada@Example.COM ` of category `work`, `date_created` `1700000000` and `date_modified` `1700000100` to a :Contact:.
+- `provider_id` is `copper`, `external_id` is the string `27140442`, `full_name` is `Ada Lovelace`.
+- `primary_email` is `ada@example.com`, `job_title` is `Engineer`, `company_name` is `Analytical Engines`.
+- `custom_fields` is `{"date_created": 1700000000, "date_modified": 1700000100}`.
+
+# name-from-parts
+:CopperContactMapping: maps a `ContactRecord` of :CopperRestAPI: with a `null` `name`, `first_name` `Ada` and `last_name` `Lovelace` to a :Contact:.
+- `full_name` is `Ada Lovelace`.
+
+# email-skips-empty-entries
+:CopperContactMapping: maps a `ContactRecord` of :CopperRestAPI: whose `emails` are an entry with an empty `email` followed by an entry with `email` ` B@Example.com ` to a :Contact:.
+- `primary_email` is `b@example.com`.
+
+# select-custom-fields
+:CopperContactMapping: maps a `ContactRecord` of :CopperRestAPI: with `date_created` `1700000000`, a `custom_fields` array with one entry of `custom_field_definition_id` `1` and `value` `x`, `tags` `["vip"]` and `middle_name` `Byron` to a :Contact:.
+- `custom_fields` is `{"date_created": 1700000000}`.
+
+***acceptance tests***

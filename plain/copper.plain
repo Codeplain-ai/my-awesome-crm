@@ -15,13 +15,16 @@ description: "Copper Integration plug-in for the CRM backend."
 
 ***functional specs***
 
-- :CopperContactMapping: maps one `ContactRecord` of :CopperRestAPI: to a :Contact:.
+# map-contact
+:CopperContactMapping: maps one `ContactRecord` of :CopperRestAPI: to a :Contact:.
 
-- :CopperIntegration: exposes a `fetch(get_stored)` entry point.
-  - It reads the following required environment variables:
-    - `COPPER_API_KEY` - the Copper Developer API key
-    - `COPPER_USER_EMAIL` - the Copper account email that owns the API key
-  - It raises `RuntimeError` naming any environment variable key that is missing or empty.
-  - It follows :CopperRestAPI: to authenticate, read every page of People, map every record with :CopperContactMapping:, and return the mapped :Contact: data dicts.
+# fetch-entry-point
+:CopperIntegration: exposes a `fetch(get_stored)` entry point.
+- It reads the following required environment variables:
+  - `COPPER_API_KEY` - the Copper Developer API key
+  - `COPPER_USER_EMAIL` - the Copper account email that owns the API key
+- It raises `RuntimeError` naming any environment variable key that is missing or empty.
+- It follows :CopperRestAPI: to authenticate, read every page of People, map every record with :CopperContactMapping:, and return the mapped :Contact: data dicts.
 
-- :CopperIntegration: exports `fetch(get_stored)` from `__init__.py`.
+# export-fetch
+:CopperIntegration: exports `fetch(get_stored)` from `__init__.py`.

@@ -1,0 +1,24 @@
+---
+module: attio
+func_id: map-person-to-contact
+---
+
+***conformance tests***
+
+# map-full-person
+:AttioContactMapping: maps a `PersonRecord` of :AttioRestAPI: with `id.record_id` `rec-1`, a name value with `full_name` `Ada Lovelace`, an email value with `email_address` ` Ada@Example.COM `, a job title value `Engineer`, a company value with `target_record_id` `co-9`, a phone value with `phone_number` `+15551234567`, a linkedin value `https://linkedin.com/in/ada` and a description value `Analyst` to a :Contact:.
+- `provider_id` is `attio`, `external_id` is `rec-1`, `full_name` is `Ada Lovelace`.
+- `primary_email` is `ada@example.com`, `job_title` is `Engineer`, `company_name` is `null`.
+- `custom_fields` is `{"company_record_id": "co-9", "phone_number": "+15551234567", "linkedin": "https://linkedin.com/in/ada", "description": "Analyst"}`.
+
+# name-from-parts
+:AttioContactMapping: maps a `PersonRecord` of :AttioRestAPI: whose name value has an empty `full_name`, `first_name` `Ada` and `last_name` `Lovelace` to a :Contact:.
+- `full_name` is `Ada Lovelace`.
+
+# select-custom-fields
+:AttioContactMapping: maps a `PersonRecord` of :AttioRestAPI: with a company value `co-9`, a `values.team` attribute and a job title value carrying `active_from` and `created_by_actor` metadata, and no phone, linkedin or description value to a :Contact:.
+- `custom_fields` has exactly the keys `company_record_id`, `phone_number`, `linkedin` and `description`.
+- `company_record_id` is `co-9`; the other three are `null`.
+- No `team` key and no metadata key is present.
+
+***acceptance tests***

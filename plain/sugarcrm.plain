@@ -15,16 +15,19 @@ description: "SugarCRM Integration plug-in for the CRM backend."
 
 ***functional specs***
 
-- :SugarCrmContactMapping: maps one `ContactRecord` of :SugarCrmRestAPI: to a :Contact:.
+# map-contact
+:SugarCrmContactMapping: maps one `ContactRecord` of :SugarCrmRestAPI: to a :Contact:.
 
-- :SugarCrmIntegration: exposes a `fetch(get_stored)` entry point.
-  - It reads the following required environment variables:
-    - `SUGARCRM_ENDPOINT` - the SugarCRM instance base URL, such as `https://your-instance.sugarondemand.com`
-    - `SUGARCRM_CLIENT_ID`
-    - `SUGARCRM_CLIENT_SECRET`
-    - `SUGARCRM_USERNAME`
-    - `SUGARCRM_PASSWORD`
-  - It raises `RuntimeError` naming any required environment variable key that is missing or empty, except that `SUGARCRM_CLIENT_SECRET` may be empty for the default `sugar` client.
-  - It follows :SugarCrmRestAPI: to authenticate, read every page of contacts, map every record with :SugarCrmContactMapping:, and return the mapped :Contact: data dicts.
+# fetch-entry-point
+:SugarCrmIntegration: exposes a `fetch(get_stored)` entry point.
+- It reads the following required environment variables:
+  - `SUGARCRM_ENDPOINT` - the SugarCRM instance base URL, such as `https://your-instance.sugarondemand.com`
+  - `SUGARCRM_CLIENT_ID`
+  - `SUGARCRM_CLIENT_SECRET`
+  - `SUGARCRM_USERNAME`
+  - `SUGARCRM_PASSWORD`
+- It raises `RuntimeError` naming any required environment variable key that is missing or empty, except that `SUGARCRM_CLIENT_SECRET` may be empty for the default `sugar` client.
+- It follows :SugarCrmRestAPI: to authenticate, read every page of contacts, map every record with :SugarCrmContactMapping:, and return the mapped :Contact: data dicts.
 
-- :SugarCrmIntegration: exports `fetch(get_stored)` from `__init__.py`.
+# export-fetch
+:SugarCrmIntegration: exports `fetch(get_stored)` from `__init__.py`.

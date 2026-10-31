@@ -1,0 +1,26 @@
+---
+module: pipedrive
+func_id: map-contact
+---
+
+***conformance tests***
+
+# map-full-contact
+:PipedriveContactMapping: maps a `ContactRecord` of :PipedriveRestAPI: with the number `42` as `id`, `name` `Ada Lovelace`, `email` entries `first@example.com` (not primary) and ` Ada@Example.COM ` (primary), `job_title` `Engineer`, `org_name` `Analytical Engines`, `org_id` with `name` `Other Org`, a `phone` entry `555-0100`, and the custom key `abc123` `blue` to a :Contact:.
+- `provider_id` is `pipedrive`, `external_id` is the string `42`, `full_name` is `Ada Lovelace`.
+- `primary_email` is `ada@example.com`, `job_title` is `Engineer`, `company_name` is `Analytical Engines`.
+- `custom_fields` is `{"abc123": "blue"}`; it has no `phone` key.
+
+# name-from-parts
+:PipedriveContactMapping: maps a `ContactRecord` of :PipedriveRestAPI: with a `null` `name`, `first_name` `Ada` and `last_name` `Lovelace` to a :Contact:.
+- `full_name` is `Ada Lovelace`.
+
+# company-from-org-id
+:PipedriveContactMapping: maps a `ContactRecord` of :PipedriveRestAPI: with an empty `org_name` and `org_id` with `name` `Other Org` to a :Contact:.
+- `company_name` is `Other Org`.
+
+# email-first-when-none-primary
+:PipedriveContactMapping: maps a `ContactRecord` of :PipedriveRestAPI: whose `email` entries `A@Example.com` and `b@example.com` are both not primary to a :Contact:.
+- `primary_email` is `a@example.com`.
+
+***acceptance tests***

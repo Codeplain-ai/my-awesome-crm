@@ -1,0 +1,27 @@
+---
+module: zoho
+func_id: map-contact
+---
+
+***conformance tests***
+
+# map-full-contact
+:ZohoContactMapping: maps a `ContactRecord` of :ZohoRestAPI: with `id` `zoho-1`, `Full_Name` `Ada Lovelace`, `Email` ` Ada@Example.COM `, `Title` `Engineer` and `Account_Name` an object with `name` `Analytical Engines` to a :Contact:.
+- `provider_id` is `zoho`, `external_id` is `zoho-1`, `full_name` is `Ada Lovelace`.
+- `primary_email` is `ada@example.com`, `job_title` is `Engineer`, `company_name` is `Analytical Engines`.
+- `custom_fields` is `{}`.
+
+# name-from-email
+:ZohoContactMapping: maps a `ContactRecord` of :ZohoRestAPI: with `null` `Full_Name`, `First_Name` and `Last_Name`, and `Email` ` Bob@Example.com ` to a :Contact:.
+- `full_name` is `Bob@Example.com`.
+- `primary_email` is `bob@example.com`.
+
+# company-from-string
+:ZohoContactMapping: maps a `ContactRecord` of :ZohoRestAPI: with `Account_Name` the string ` Analytical Engines ` to a :Contact:.
+- `company_name` is `Analytical Engines`.
+
+# select-custom-fields
+:ZohoContactMapping: maps a `ContactRecord` of :ZohoRestAPI: with `Department` `Research`, `$approved` `true`, an `Owner` object with `name` `Sam` and an `Account_Name` object to a :Contact:.
+- `custom_fields` is `{"Department": "Research"}`.
+
+***acceptance tests***

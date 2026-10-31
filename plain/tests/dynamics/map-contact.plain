@@ -1,0 +1,22 @@
+---
+module: dynamics
+func_id: map-contact
+---
+
+***conformance tests***
+
+# map-full-contact
+:DynamicsContactMapping: maps a `ContactRecord` of :DynamicsRestAPI: with `contactid` `c0ffee00-0000-4000-8000-000000000001`, `fullname` `Ada Lovelace`, `emailaddress1` ` Ada@Example.COM `, `jobtitle` `Engineer` and `parentcustomerid_account` with `name` `Analytical Engines` to a :Contact:.
+- `provider_id` is `dynamics`, `external_id` is `c0ffee00-0000-4000-8000-000000000001`, `full_name` is `Ada Lovelace`.
+- `primary_email` is `ada@example.com`, `job_title` is `Engineer`, `company_name` is `Analytical Engines`.
+- `custom_fields` is `{}`.
+
+# name-from-parts
+:DynamicsContactMapping: maps a `ContactRecord` of :DynamicsRestAPI: with a `null` `fullname`, `firstname` `Ada` and `lastname` `Lovelace` to a :Contact:.
+- `full_name` is `Ada Lovelace`.
+
+# select-custom-fields
+:DynamicsContactMapping: maps a `ContactRecord` of :DynamicsRestAPI: with `telephone1` `555-0100`, `@odata.etag` `W/"1"`, the annotation key `jobtitle@OData.Community.Display.V1.FormattedValue` and a `parentcustomerid_account` object to a :Contact:.
+- `custom_fields` is `{"telephone1": "555-0100"}`.
+
+***acceptance tests***

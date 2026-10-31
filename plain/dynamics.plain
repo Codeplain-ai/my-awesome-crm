@@ -15,15 +15,18 @@ description: "Dynamics 365 Integration plug-in for the CRM backend."
 
 ***functional specs***
 
-- :DynamicsContactMapping: maps one `ContactRecord` of :DynamicsRestAPI: to a :Contact:.
+# map-contact
+:DynamicsContactMapping: maps one `ContactRecord` of :DynamicsRestAPI: to a :Contact:.
 
-- :DynamicsIntegration: exposes a `fetch(get_stored)` entry point.
-  - It reads the following required environment variables:
-    - `DYNAMICS_ENDPOINT` - the Dataverse organization base URL, such as `https://your-org.crm4.dynamics.com`
-    - `DYNAMICS_TENANT_ID` - the Microsoft Entra tenant identifier for the Dataverse organization
-    - `DYNAMICS_CLIENT_ID`
-    - `DYNAMICS_CLIENT_SECRET`
-  - It raises `RuntimeError` naming any environment variable key that is missing or empty.
-  - It follows :DynamicsRestAPI: to authenticate, read every page of contacts, map every record with :DynamicsContactMapping:, and return the mapped :Contact: data dicts.
+# fetch-entry-point
+:DynamicsIntegration: exposes a `fetch(get_stored)` entry point.
+- It reads the following required environment variables:
+  - `DYNAMICS_ENDPOINT` - the Dataverse organization base URL, such as `https://your-org.crm4.dynamics.com`
+  - `DYNAMICS_TENANT_ID` - the Microsoft Entra tenant identifier for the Dataverse organization
+  - `DYNAMICS_CLIENT_ID`
+  - `DYNAMICS_CLIENT_SECRET`
+- It raises `RuntimeError` naming any environment variable key that is missing or empty.
+- It follows :DynamicsRestAPI: to authenticate, read every page of contacts, map every record with :DynamicsContactMapping:, and return the mapped :Contact: data dicts.
 
-- :DynamicsIntegration: exports `fetch(get_stored)` from `__init__.py`.
+# export-fetch
+:DynamicsIntegration: exports `fetch(get_stored)` from `__init__.py`.

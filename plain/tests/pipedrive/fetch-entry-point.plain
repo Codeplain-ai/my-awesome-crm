@@ -1,0 +1,13 @@
+---
+module: pipedrive
+func_id: fetch-entry-point
+---
+
+***conformance tests***
+
+# fetch-live-contacts
+:PipedriveIntegration: `fetch(get_stored)` is called against the live Pipedrive account with the :IntegrationCredentials: from the environment and a `get_stored` that returns an empty list.
+- It returns a list with at least one item.
+- Every item has `data_type` `contact` and a `data` object whose `provider_id` is `pipedrive` and whose `external_id` is a non-empty string.
+
+***acceptance tests***
