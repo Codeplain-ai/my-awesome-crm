@@ -22,7 +22,8 @@
 # modules that rendered successfully in this run are present afterwards.
 #
 # Switch windows with the tmux prefix + n / p. The script attaches to the
-# session (or switches to it when already inside tmux).
+# session (or switches to it when already inside tmux). When it is run without
+# a usable terminal it leaves the session running and prints the attach command.
 #
 #   Usage: ./scripts/regenerate_integrations.sh
 #
@@ -181,8 +182,24 @@ tmux new-window -d -t "$SESSION" -n deploy -c "$ROOT" \
     "'$SCRIPT_DIR/regenerate_integrations.sh' --after-renders '$STATUS_DIR' ${MODULES[*]}; echo; echo '[deploy window finished - press Enter to close]'; read -r _"
 
 tmux select-window -t "$RENDER_WINDOW"
+
+# True when stdin is a terminal tmux can attach to. On Linux a descriptor opened
+# via /dev/tty reports the literal name /dev/tty, which tmux rejects; macOS
+# reports the real device (e.g. /dev/ttys003), so the check is a no-op there.
+tmux_input_is_usable() {
+    local terminal
+    terminal=$(tty 2>/dev/null) || return 1
+    [ "$terminal" != "/dev/tty" ]
+}
+
 if [ -n "${TMUX:-}" ]; then
     tmux switch-client -t "$SESSION"
-else
+elif tmux_input_is_usable; then
     tmux attach-session -t "$SESSION"
+elif tmux_input_is_usable <&1; then
+    # Reuse stdout's terminal when stdin is unsuitable (e.g. the script was
+    # started with stdin redirected).
+    tmux attach-session -t "$SESSION" <&1
+else
+    echo "Attach from a terminal with: tmux attach-session -t '$SESSION'"
 fi
