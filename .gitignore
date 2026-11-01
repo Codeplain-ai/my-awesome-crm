@@ -7,3 +7,5 @@ codeplain.log
 crm.db
 dist
 codeplain.*.log
+
+.codeplain
