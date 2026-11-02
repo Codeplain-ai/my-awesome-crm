@@ -9,3 +9,4 @@ dist
 codeplain.*.log
 
 .codeplain
+plain/plain_modules/
