@@ -1,11 +1,17 @@
 #!/bin/bash
 # Prepare-environment script for an EMBEDDED CRM integration plug-in (Python).
 #
-# The renderer calls this ONCE per render, before any conformance run. It
-# builds the one expensive thing every conformance run needs - a venv with the
-# host requirements.txt and pytest installed - so run_conformance_tests_python.sh
-# (activate-only variant) attaches to it instead of creating and populating a
-# fresh venv on every one of its N invocations per render.
+# The renderer calls this before the conformance runs of every functional spec.
+# It builds the one expensive thing every conformance run needs - a venv with
+# the host requirements.txt and pytest installed - so
+# run_conformance_tests_python.sh (activate-only variant) attaches to it instead
+# of creating and populating a fresh venv on every one of its invocations.
+#
+# The venv depends only on the host requirements.txt and interpreter, not on
+# the generated code, so it is built once per render and reused by every later
+# call: the ready marker stores a fingerprint of what the venv was built from,
+# and a call whose fingerprint matches returns right away. Building it takes
+# 7-10s, which is otherwise paid again for every functional spec.
 #
 # What this script deliberately does NOT do: stage the build folder ($1). The
 # generated implementation changes after every functional spec renders, while
@@ -23,8 +29,8 @@
 # one folder; keying on the module lets several renders (e.g.
 # scripts/regenerate_integrations.sh) prepare side by side. run_conformance_tests_python.sh
 # derives the identical path. The folder is intentionally LEFT IN PLACE on exit:
-# it is this script's deliverable, and the next prepare of the same module
-# wipes and rebuilds it.
+# it is this script's deliverable. The next prepare of the same module reuses
+# it when the fingerprint matches, and wipes and rebuilds it otherwise.
 #
 # The venv is built from the HOST project's interpreter at
 # $HOST_CODEBASE_ROOT/.venv (provisioned by scripts/start.sh), so the tests run
@@ -104,6 +110,20 @@ READY_MARKER="$PREPARED_ENV/.prepared"
 
 printf "Module:           %s\n" "$MODULE_NAME"
 printf "Prepared env:     %s\n" "$PREPARED_ENV"
+
+# Everything the venv is built from: the host requirements, the interpreter and
+# the extra test packages installed in [5/5].
+HOST_REQUIREMENTS="$HOST_CODEBASE_ROOT/requirements.txt"
+FINGERPRINT="$( { cat "$HOST_REQUIREMENTS" 2>/dev/null; "$PYTHON_CMD" --version 2>&1; echo "pytest"; } \
+    | "$PYTHON_CMD" -c 'import hashlib, sys; print(hashlib.sha1(sys.stdin.buffer.read()).hexdigest())')" \
+    || fail "could not fingerprint the venv inputs"
+if [ -x "$VENV_PY" ] && [ -f "$VENV_DIR/pyvenv.cfg" ] && [ "$(cat "$READY_MARKER" 2>/dev/null)" = "$FINGERPRINT" ]; then
+    printf "Reusing the prepared venv: its requirements and interpreter are unchanged.\n"
+    printf "\nSummary: lang=python prepared_env=%s venv=%s reused=1 duration=%ss exit=0\n" \
+        "$PREPARED_ENV" "$VENV_DIR" "$(($(date +%s) - start_time))"
+    exit 0
+fi
+
 run rm -rf "$PREPARED_ENV"
 run mkdir -p "$PREPARED_ENV"
 cd "$PREPARED_ENV" 2>/dev/null || fail "could not enter prepared env folder $PREPARED_ENV"
@@ -131,7 +151,6 @@ install_start=$(date +%s)
 run "$VENV_PY" -m pip install --upgrade pip
 # Host runtime deps, read in place (read-only) from the real host tree, so the
 # conformance runner's snapshot of the implementation imports cleanly.
-HOST_REQUIREMENTS="$HOST_CODEBASE_ROOT/requirements.txt"
 if [ -f "$HOST_REQUIREMENTS" ]; then
     printf "Installing host requirements from %s into %s\n" "$HOST_REQUIREMENTS" "$VENV_DIR"
     run "$VENV_PY" -m pip install -r "$HOST_REQUIREMENTS"
@@ -143,8 +162,9 @@ install_end=$(date +%s)
 printf "Requirements setup completed in %s seconds\n" "$((install_end - install_start))"
 
 # Written last, so the conformance runner can tell a complete environment from
-# one a failed prepare left half-built.
-run touch "$READY_MARKER"
+# one a failed prepare left half-built. It holds the fingerprint checked in
+# [3/5] to reuse the venv.
+printf '%s\n' "$FINGERPRINT" > "$READY_MARKER" || fail "could not write the ready marker $READY_MARKER"
 
 end_time=$(date +%s)
 printf "\nSummary: lang=python prepared_env=%s venv=%s python=%s duration=%ss exit=0\n" \
