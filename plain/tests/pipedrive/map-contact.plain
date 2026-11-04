@@ -23,4 +23,12 @@ func_id: map-contact
 :PipedriveContactMapping: maps a `ContactRecord` of :PipedriveRestAPI: whose `email` entries `A@Example.com` and `b@example.com` are both not primary to a :Contact:.
 - `primary_email` is `a@example.com`.
 
+# empty-email-entry
+:PipedriveContactMapping: maps a `ContactRecord` of :PipedriveRestAPI: whose `email` is the single entry `{"value": "", "primary": true}` to a :Contact:.
+- `primary_email` is `None`.
+
+# no-organization
+:PipedriveContactMapping: maps a `ContactRecord` of :PipedriveRestAPI: with `org_id` `null` and `org_name` `null` to a :Contact:.
+- `company_name` is `None`.
+
 ***acceptance tests***
