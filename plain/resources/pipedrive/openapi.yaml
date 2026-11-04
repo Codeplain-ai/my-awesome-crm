@@ -3,17 +3,20 @@ info:
   title: Pipedrive REST API surface used by the pipedrive integration
   description: >
     The exact Pipedrive REST API surface the pipedrive integration calls.
-    Grounded in Pipedrive REST API documentation (2026-06-17); no live
-    credentials were available, so this is NOT yet cross-checked against the
-    live API - re-probe read-only (GET /v1/persons) when credentials arrive and
-    let the live API win on any discrepancy.
+    Grounded in Pipedrive REST API documentation (2026-06-17) and verified
+    against the live account on 2026-11-04 with read-only GET probes (users/me,
+    persons list, deliberate 401, invalid limit). Where docs and the live API
+    disagree, the live API wins. Multi-page paging (next_start) has not yet
+    been exercised live: every probed page held all records.
 
     API version is pinned to v1 (the version segment lives in the URL path
-    /v1/persons). v1 was chosen over the newer /api/v2/persons for simplicity
-    and stability: v1 authenticates with a plain api_token query parameter and
-    uses straightforward offset pagination (start/limit + next_start), whereas
-    v2 requires the x-api-token header and opaque cursor pagination. v1 remains
-    a supported, stable surface for read access to Persons.
+    /v1/persons). v1 is DEPRECATED: every v1 response carries a
+    deprecation_warning. It is still pinned because v2 /api/v2/persons drops
+    what the mapping needs: its persons carry emails/phones instead of
+    email/phone, org_id is a bare integer with no organization name, and there
+    is no org_name or job_title, so company_name and job_title would need extra
+    lookups. v2 also uses cursor pagination (next_cursor) instead of
+    start/limit + next_start. Revisit when v1 is removed.
 
     Authentication is a Pipedrive personal API token passed as the api_token
     query parameter on every request. The base host is the company-specific
@@ -25,14 +28,17 @@ info:
     company-domain host; this integration uses the api_token query parameter,
     not OAuth.
 
-    Dirty-data notes (anticipated, to confirm on the live cross-check): email
-    is an ARRAY of objects shaped {value, label, primary}, not
-    flat strings - the integration must pick the entry whose primary flag is
-    true, else the first entry, else None. An email value is NOT guaranteed to
-    be a valid email address. Most fields (name, first_name, last_name,
-    job_title, org_id, email) are nullable; only id is always present.
-    org_id may be null, or an object whose name field holds the organization
-    name.
+    Dirty-data notes (live-verified): email is an ARRAY of objects shaped
+    {value, label, primary}, not flat strings - the integration must pick the
+    entry whose primary flag is true, else the first entry, else None. A person
+    with no email returns [{"value": "", "primary": true}], not an empty array.
+    Pipedrive trims whitespace and rejects malformed addresses on write
+    (400 "emails: The value must be a valid email"), but keeps case, so an
+    email value is still NOT guaranteed to be a valid or lowercase address
+    (e.g. imported data). job_title and org_id may be null; org_id is null for
+    a person with no organization, else an object whose name field holds the
+    organization name. Every v1 person also carries a flat primary_email, which
+    the integration does not use.
   version: v1
 servers:
   - url: "https://{company}.pipedrive.com/v1"
@@ -96,10 +102,18 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ListEnvelope"
+        "400":
+          description: >
+            Invalid parameter (live probe: limit=-5 returns success false and
+            error "Invalid limit parameter value, should be a positive value").
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
         "401":
           description: >
-            Missing or invalid api_token (Pipedrive returns success false with
-            an error message and HTTP 401).
+            Missing or invalid api_token (live probe: HTTP 401 with success
+            false, error "unauthorized access" and errorCode 401).
           content:
             application/json:
               schema:
@@ -162,8 +176,9 @@ components:
         One Person entry of data[]. Only id is guaranteed present; every other
         field is nullable. email is an ARRAY of objects shaped
         {value, label, primary} - the integration picks the entry whose primary
-        flag is true, else the first entry, else None. An email value is NOT
-        guaranteed to be a valid email address. org_id may be null or an object
+        flag is true, else the first entry, else None. A person with no email
+        carries [{"value": "", "primary": true}]. An email value is NOT
+        guaranteed to be a valid or lowercase email address. org_id may be null or an object
         carrying the organization name under its name field; org_name (when
         present) mirrors that name as a flat string.
       required: [id]
@@ -222,8 +237,9 @@ components:
       type: object
       description: >
         Pipedrive error bodies are a JSON object carrying success false plus an
-        error message and an error_info string (to confirm against the live API
-        when credentials arrive).
+        error message (live-verified). A 401 body carries error and errorCode
+        only; a 400 body also carries error_info, data, additional_data and
+        code.
       required: [success, error]
       properties:
         success:
@@ -233,4 +249,6 @@ components:
         error_info:
           type: string
         errorCode:
+          type: integer
+        code:
           type: integer

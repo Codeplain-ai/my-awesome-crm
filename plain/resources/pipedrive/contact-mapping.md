@@ -36,7 +36,7 @@ absent.
   entry is marked primary, it is the `value` of the first entry; if `email` is missing, null, or
   empty, the chosen email value is empty.
 - `primary_email` is that chosen email value, lowercased and trimmed.
-- A missing or empty chosen email value maps to `None`.
+- A missing or empty chosen email value maps to `None`. Pipedrive returns `[{"value": "", "primary": true}]` for a person with no email, so an entry with an empty `value` is the common case, not an edge case.
 - The value is passed through as-is otherwise; the host does not validate email format, so no
   validity check is performed and no value is discarded.
 
