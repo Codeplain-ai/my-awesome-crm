@@ -286,9 +286,11 @@ mandates that an error message "names" something, pin the identifier space and g
   two are not alternatives; they are the same contract on two platforms, wired up by two configs
   (`plain/config.yaml` → `test_scripts/*.sh`, `plain/config.pwsh.yaml` → `test_scripts/*.ps1`), so a
   fix landed on only one side means Windows and macOS/Linux users render against *different
-  behavior* and the divergence is invisible to whoever is not on that platform. The project's three
+  behavior* and the divergence is invisible to whoever is not on that platform. The project's
   pairs are `plain/test_scripts/run_unittests_python.{sh,ps1}`,
-  `plain/test_scripts/run_conformance_tests_python.{sh,ps1}`, and `scripts/start.{sh,ps1}`. When
+  `plain/test_scripts/run_conformance_tests_python.{sh,ps1}`, `scripts/start.{sh,ps1}`, and
+  `scripts/regenerate_integrations.{sh,ps1}` (the one sanctioned divergence: separate console
+  windows replace the tmux session, which has no Windows build). When
   touching one member: port the change to its twin in the same commit, keep the staging model, exit
   codes, pytest flags, and pass criteria identical, mirror the comments so the *reasoning* stays in
   both, and re-check that the header line claiming the file "does exactly the same thing" as its
