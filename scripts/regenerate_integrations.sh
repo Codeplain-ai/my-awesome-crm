@@ -30,8 +30,9 @@
 # Requires tmux and codeplain on PATH, and CODEPLAIN_API_KEY in the shell the
 # panes start (i.e. exported by your shell profile or the tmux server's env).
 #
-# macOS / Linux only: tmux has no native Windows build, so there is no .ps1
-# counterpart.
+# macOS / Linux only: tmux has no native Windows build. The Windows counterpart,
+# regenerate_integrations.ps1, does the same thing with one console window per
+# render instead of a tmux session.
 
 set -u
 
