@@ -1,5 +1,5 @@
 #!/bin/bash
-# Regenerate the code of four integrations - hubspot, dynamics, salesforce and
+# Regenerate the code of four integrations - hubspot, dynamics, pipedrive and
 # attio - side by side, then deploy and run.
 #
 #   1. Starts from a clean slate: removes each module's build folder
@@ -35,7 +35,7 @@
 
 set -u
 
-MODULES=(hubspot dynamics salesforce attio)
+MODULES=(hubspot dynamics pipedrive attio)
 SESSION="regenerate-integrations"
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
