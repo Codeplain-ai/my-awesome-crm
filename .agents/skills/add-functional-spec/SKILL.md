@@ -72,7 +72,7 @@ Functionality must be self-contained in the spec text. `requires` modules only i
 
 ## Test Scenarios
 
-After inserting the spec, invoke `add-test-scenarios` for it. It writes the functionality's test plain file (by convention `tests/<module>/<func-id>.plain`), which should hold at least one conformance scenario when conformance tests are enabled for the module.
+After inserting the spec, invoke `add-test-scenarios` for it. It writes the functionality's test plain file under the folder that `tests-folder` names in the governing `config.yaml`, and sets the key first when it is missing.
 
 ## Validation Checklist
 

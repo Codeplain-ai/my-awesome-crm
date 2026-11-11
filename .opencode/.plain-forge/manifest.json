@@ -1,6 +1,6 @@
 {
   "name": "plain-forge",
-  "version": "1.0.23",
+  "version": "1.1.0",
   "agent": "opencode",
   "files": [
     "rules/plain-forge.md",
@@ -80,6 +80,13 @@
     "skills/load-plain-reference/rules/test-reqs.md",
     "skills/plain-healthcheck/SKILL.md",
     "skills/refactor-module/SKILL.md",
+    "skills/render-spec/SKILL.md",
+    "skills/render-spec/references/plain-lang.md",
+    "skills/render-spec/references/render-plan.md",
+    "skills/render-spec/scripts/check_version.py",
+    "skills/render-spec/scripts/copy_folder.py",
+    "skills/render-spec/scripts/plain_sections.py",
+    "skills/render-spec/scripts/test_scenarios.py",
     "skills/resolve-section-ownership/SKILL.md",
     "skills/resolve-spec-conflict/SKILL.md"
   ]
