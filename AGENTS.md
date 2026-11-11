@@ -6,23 +6,20 @@ runtime-discovered plug-in at `src/integrations/<name>/` exposing a top-level `f
 callable, which returns a list of `{data_type, data}` records that the host's generic record store
 persists verbatim.
 
-## The reference and host context are auto-loaded into context
+## Host context is auto-loaded; the ***plain rules load on demand
 
-The bulk authoring context is loaded **uncapped via CLAUDE.md `@imports`** (see *Auto-loaded startup
-context* at the end of this file): the full ***plain language reference, the `salesforce.plain`
-structural exemplar, the `crm_common` + `integration_testing` templates, the host's `schemas.py` /
-`ingest.py` / `requirements.txt`, `plain/config.yaml`, and the salesforce `openapi.yaml` +
-`contact-mapping.md`. The imports expand the **live** files every session, so they never drift.
+The host and exemplar context is loaded **uncapped via this file's `@imports`** (see *Auto-loaded
+startup context* at the end of this file): the `salesforce.plain` structural exemplar, the
+`crm_common` + `integration_testing` templates, the host's `schemas.py` / `ingest.py` /
+`requirements.txt`, `plain/config.yaml`, and the salesforce `openapi.yaml` + `contact-mapping.md`.
+The imports expand the **live** files every session, so they never drift.
 
-A small `SessionStart` hook (`.claude/hooks/load-integration-context.sh`) adds only the **dynamic**
-piece the imports can't express: the current list of existing integrations, so you don't duplicate a
-provider. (History: the hook used to dump everything, but Claude Code caps each hook output at
-~10K chars and persists the overflow to a file instead of injecting it — so the heavy, static content
-moved to `@imports`, which are uncapped.)
+The ***plain authoring rules are **not** imported. Before reading, editing, or writing any `.plain`
+file, invoke `/load-plain-reference` and read the rule files it routes you to (under
+`.claude/skills/load-plain-reference/rules/`).
 
-Because of this, **do not invoke `/load-plain-reference`** and **do not perform manual host discovery**
-(reading those exemplar/template/host files to learn the stack) — that context is already in your
-window. Host facts remain deductions, not questions. The provider-specific live-API cross-check
+**Do not perform manual host discovery** (reading those exemplar/template/host files to learn the
+stack) — that context is already in your window. Host facts remain deductions, not questions. The provider-specific live-API cross-check
 (`integrations.md` § *Live API must be cross-checked*) is **not** covered by this and still must be
 done per integration.
 
@@ -49,15 +46,13 @@ Do **not** invoke any of the following skills in this project:
 **Agents and workflows should never be spawned in this repo.** Do not use the `Agent` tool (of any
 `subagent_type`, including `fork`, `Explore`, `Plan`, and `general-purpose`) and do not use the
 `Workflow` tool. All work — authoring, editing, reviewing, debugging, host discovery, and API
-cross-checks — is done directly in the main conversation. The full authoring context is already
-loaded via CLAUDE.md `@imports`, so there is no research a subagent could do that this session
-cannot do itself.
+cross-checks — is done directly in the main conversation. 
 
 ## Do not create a plan when writing plain specs
 
 When authoring, editing, reviewing, or debugging any `.plain` content, **do not use the plan tool**
 and do not produce a written plan. Spec authoring is governed end-to-end by the rules in
-`.claude/rules/` and the lessons in this file — that workflow is the plan. Work the rules directly
+`.claude/skills/load-plain-reference/rules/` and the lessons in this file — that workflow is the plan. Work the rules directly
 instead of drafting a separate one.
 
 ## First step: create the empty `.plain` module with its frontmatter
@@ -263,11 +258,43 @@ mandates that an error message "names" something, pin the identifier space and g
   not the values. Never print or paste the values themselves into a spec, summary, or commit —
   reference them by env-var name only.
 - **Keep `verbose: true` in `plain/config.yaml`.** codeplain's `--verbose` defaults to *disabled*;
-  without the config pin the log carries no test-script output, which silently blinds both the
-  post-render mining below and `run-codeplain`'s spec-deviation classification.
+  without the config pin the log carries no test-script output, which silently blinds the
+  post-render mining below.
 - **After every render, mine `conformance_tests/<module>/.memory/conformance_test_memory/*.json`**
   and the log for `Specification ambiguity detected` blocks. Every RESOLVED entry and ambiguity
   suggestion is a render-time incident whose lesson gets folded into the specs and this file.
+- **Every test script derives its interpreter from the host venv — never from `PATH`.** Python
+  `>= 3.12` is a *floor*, not a pin (any newer stable release is fine, pre-releases are not), but
+  the tests must run on the **same** interpreter as the host. All four `plain/test_scripts/`
+  runners therefore resolve `$HOST_CODEBASE_ROOT/.venv` (created by `scripts/start.{sh,ps1}`) and
+  fail fast with exit `69`
+  when it is absent or invalid; the unit-test runners run *in* it, and the conformance runners build
+  their isolated suite venv *from* it (isolation is still needed — the suite installs its own test
+  deps, e.g. `respx`). **Never reintroduce a newest-on-`PATH` candidate scan** (`py -3.15`,
+  `python3.14`, …) into a test script: on a box with a newer Python than the host venv it silently
+  runs the suite on an interpreter the host never uses, which is how a `respx` install broke a
+  render on a Windows machine whose host venv was 3.12 while the test venv resolved to 3.14. That
+  scan belongs only in `scripts/start.{sh,ps1}`, which *provisions* the host venv — and both
+  platforms' copies must agree on the window at both ends (Windows previously required *exactly*
+  3.12).
+- **A `.sh` script and its mirroring `.ps1` are maintained in lockstep — never fix one alone.** The
+  two are not alternatives; they are the same contract on two platforms, wired up by two configs
+  (`plain/config.yaml` → `test_scripts/*.sh`, `plain/config.pwsh.yaml` → `test_scripts/*.ps1`), so a
+  fix landed on only one side means Windows and macOS/Linux users render against *different
+  behavior* and the divergence is invisible to whoever is not on that platform. The project's three
+  pairs are `plain/test_scripts/run_unittests_python.{sh,ps1}`,
+  `plain/test_scripts/run_conformance_tests_python.{sh,ps1}`, and `scripts/start.{sh,ps1}`. When
+  touching one member: port the change to its twin in the same commit, keep the staging model, exit
+  codes, pytest flags, and pass criteria identical, mirror the comments so the *reasoning* stays in
+  both, and re-check that the header line claiming the file "does exactly the same thing" as its
+  counterpart is still true. Only genuinely platform-specific mechanics may differ — path
+  separators, `bin/python` vs `Scripts\python.exe`, `$LASTEXITCODE` vs `$?`, `.env` parsing idiom.
+  This is not hypothetical: the Windows 3.14 interpreter incident above happened precisely because a
+  prior commit fixed `run_unittests_python.sh` to use the host venv and left the `.ps1` on its old
+  newest-on-`PATH` scan. Two scoping notes: `scripts/cleanup.sh` is currently **unpaired** (no
+  `.ps1` twin — a known gap; if it gains one, it joins the list above), and the many
+  `.sh`/`.ps1` files under `.claude/skills/*/assets/` are **vendored plain-forge templates**, not
+  this project's scripts — do not maintain or edit those as pairs.
 
 ## Conformance is a pure-function mapping check — and specs still render incrementally
 
@@ -380,12 +407,6 @@ module itself authors none).
 
 ## Auto-loaded startup context (`@imports` — do not remove)
 
-These `@`-imports load the full authoring context into every session, **uncapped** — the ~10K-char
-SessionStart-hook output limit does **not** apply to CLAUDE.md imports. They expand the **live** files
-at launch, so the context never drifts from source. The dynamic existing-integrations list is added
-separately by `.claude/hooks/load-integration-context.sh`. Paths are relative to this file (repo root).
-
-@.claude/skills/load-plain-reference/SKILL.md
 @README.md
 @plain/salesforce.plain
 @plain/template/crm_common.plain
@@ -396,3 +417,47 @@ separately by `.claude/hooks/load-integration-context.sh`. Paths are relative to
 @plain/config.yaml
 @plain/resources/salesforce/openapi.yaml
 @plain/resources/salesforce/contact-mapping.md
+
+# Rules for working with this repo
+
+## 1. Think Before Coding
+
+**Don't assume. Don't hide confusion. Surface tradeoffs.**
+
+Before implementing:
+- State your assumptions explicitly. If uncertain, ask.
+- If multiple interpretations exist, present them - don't pick silently.
+- If a simpler approach exists, say so. Push back when warranted.
+- If something is unclear, stop. Name what's confusing. Ask.
+
+## 2. Simplicity First
+
+**Minimum code that solves the problem. Nothing speculative.**
+
+- No features beyond what was asked.
+- No abstractions for single-use code.
+- No "flexibility" or "configurability" that wasn't requested.
+- No error handling for impossible scenarios.
+- If you write 200 lines and it could be 50, rewrite it.
+
+Ask yourself: "Would a senior engineer say this is overcomplicated?" If yes, simplify.
+
+## 3. Surgical Changes
+
+**Touch only what you must. Clean up only your own mess.**
+
+When editing existing code:
+- Don't "improve" adjacent code, comments, or formatting.
+- Don't refactor things that aren't broken.
+- Match existing style, even if you'd do it differently.
+- If you notice unrelated dead code, mention it - don't delete it.
+
+When your changes create orphans:
+- Remove imports/variables/functions that YOUR changes made unused.
+- Don't remove pre-existing dead code unless asked.
+
+The test: Every changed line should trace directly to the user's request.
+
+---
+
+**These guidelines are working if:** fewer unnecessary changes in diffs, fewer rewrites due to overcomplication, and clarifying questions come before implementation rather than after mistakes.
