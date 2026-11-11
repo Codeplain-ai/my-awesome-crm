@@ -6,23 +6,20 @@ runtime-discovered plug-in at `src/integrations/<name>/` exposing a top-level `f
 callable, which returns a list of `{data_type, data}` records that the host's generic record store
 persists verbatim.
 
-## The reference and host context are auto-loaded into context
+## Host context is auto-loaded; the ***plain rules load on demand
 
-The bulk authoring context is loaded **uncapped via CLAUDE.md `@imports`** (see *Auto-loaded startup
-context* at the end of this file): the full ***plain language reference, the `salesforce.plain`
-structural exemplar, the `crm_common` + `integration_testing` templates, the host's `schemas.py` /
-`ingest.py` / `requirements.txt`, `plain/config.yaml`, and the salesforce `openapi.yaml` +
-`contact-mapping.md`. The imports expand the **live** files every session, so they never drift.
+The host and exemplar context is loaded **uncapped via CLAUDE.md `@imports`** (see *Auto-loaded
+startup context* at the end of this file): the `salesforce.plain` structural exemplar, the
+`crm_common` + `integration_testing` templates, the host's `schemas.py` / `ingest.py` /
+`requirements.txt`, `plain/config.yaml`, and the salesforce `openapi.yaml` + `contact-mapping.md`.
+The imports expand the **live** files every session, so they never drift.
 
-A small `SessionStart` hook (`.claude/hooks/load-integration-context.sh`) adds only the **dynamic**
-piece the imports can't express: the current list of existing integrations, so you don't duplicate a
-provider. (History: the hook used to dump everything, but Claude Code caps each hook output at
-~10K chars and persists the overflow to a file instead of injecting it — so the heavy, static content
-moved to `@imports`, which are uncapped.)
+The ***plain authoring rules are **not** imported. Before reading, editing, or writing any `.plain`
+file, invoke `/load-plain-reference` and read the rule files it routes you to (under
+`.claude/skills/load-plain-reference/rules/`).
 
-Because of this, **do not invoke `/load-plain-reference`** and **do not perform manual host discovery**
-(reading those exemplar/template/host files to learn the stack) — that context is already in your
-window. Host facts remain deductions, not questions. The provider-specific live-API cross-check
+**Do not perform manual host discovery** (reading those exemplar/template/host files to learn the
+stack) — that context is already in your window. Host facts remain deductions, not questions. The provider-specific live-API cross-check
 (`integrations.md` § *Live API must be cross-checked*) is **not** covered by this and still must be
 done per integration.
 
@@ -49,9 +46,7 @@ Do **not** invoke any of the following skills in this project:
 **Agents and workflows should never be spawned in this repo.** Do not use the `Agent` tool (of any
 `subagent_type`, including `fork`, `Explore`, `Plan`, and `general-purpose`) and do not use the
 `Workflow` tool. All work — authoring, editing, reviewing, debugging, host discovery, and API
-cross-checks — is done directly in the main conversation. The full authoring context is already
-loaded via CLAUDE.md `@imports`, so there is no research a subagent could do that this session
-cannot do itself.
+cross-checks — is done directly in the main conversation. 
 
 ## Do not create a plan when writing plain specs
 
@@ -412,36 +407,6 @@ module itself authors none).
 
 ## Auto-loaded startup context (`@imports` — do not remove)
 
-These `@`-imports load the full authoring context into every session, **uncapped** — the ~10K-char
-SessionStart-hook output limit does **not** apply to CLAUDE.md imports. They expand the **live** files
-at launch, so the context never drifts from source. The dynamic existing-integrations list is added
-separately by `.claude/hooks/load-integration-context.sh`. Paths are relative to this file (repo root).
-
-The ***plain authoring rules ship inside the `load-plain-reference` skill (`rules/`), which no longer
-loads them natively, so every rule file is imported here. When plain-forge is updated, re-sync this
-list with `ls .claude/skills/load-plain-reference/rules/*.md`.
-
-@.claude/skills/load-plain-reference/SKILL.md
-@.claude/skills/load-plain-reference/rules/bullet-continuation.md
-@.claude/skills/load-plain-reference/rules/concise-specs-examples.md
-@.claude/skills/load-plain-reference/rules/concise-specs-integration-examples.md
-@.claude/skills/load-plain-reference/rules/concise-specs.md
-@.claude/skills/load-plain-reference/rules/definitions.md
-@.claude/skills/load-plain-reference/rules/exported-concepts.md
-@.claude/skills/load-plain-reference/rules/func-specs.md
-@.claude/skills/load-plain-reference/rules/impl-reqs.md
-@.claude/skills/load-plain-reference/rules/import-modules.md
-@.claude/skills/load-plain-reference/rules/integration-embedded-testing.md
-@.claude/skills/load-plain-reference/rules/integration-embedded.md
-@.claude/skills/load-plain-reference/rules/integration-standalone.md
-@.claude/skills/load-plain-reference/rules/integrations.md
-@.claude/skills/load-plain-reference/rules/linked-resources.md
-@.claude/skills/load-plain-reference/rules/module-structure.md
-@.claude/skills/load-plain-reference/rules/required-concepts.md
-@.claude/skills/load-plain-reference/rules/requires-modules.md
-@.claude/skills/load-plain-reference/rules/semantic-ids.md
-@.claude/skills/load-plain-reference/rules/test-plain-files.md
-@.claude/skills/load-plain-reference/rules/test-reqs.md
 @README.md
 @plain/salesforce.plain
 @plain/template/crm_common.plain
