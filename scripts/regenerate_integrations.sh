@@ -173,7 +173,7 @@ done
 i=0
 for module in "${MODULES[@]}"; do
     tmux send-keys -t "${PANES[$i]}" \
-        "codeplain $module.plain --log-file-name codeplain.$module.log; touch '$STATUS_DIR/$module'" Enter
+        "codeplain $module.plain --exit-when-done --log-file-name codeplain.$module.log; touch '$STATUS_DIR/$module'" Enter
     i=$((i + 1))
 done
 
